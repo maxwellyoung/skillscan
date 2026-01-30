@@ -70,11 +70,14 @@ export default function Home() {
             className="text-center"
           >
             <h1 className="text-5xl md:text-7xl font-bold mb-6">
-              Is that skill{' '}
-              <span className="gradient-text">safe to install?</span>
+              Every skill is{' '}
+              <span className="gradient-text">guilty until proven safe</span>
             </h1>
-            <p className="text-xl md:text-2xl text-muted mb-12 max-w-3xl mx-auto">
-              Scan Claude Code skills and MCP servers for security risks before they access your system.
+            <p className="text-xl md:text-2xl text-muted mb-8 max-w-3xl mx-auto">
+              Don&apos;t read every file yourself. Let us scan ClawdHub skills for malicious code in seconds.
+            </p>
+            <p className="text-lg text-warning mb-12 max-w-2xl mx-auto font-semibold">
+              Inspired by the viral &quot;It Got Worse - Clawdbot&quot; video exposing thousands of compromised instances
             </p>
             
             <motion.button
@@ -98,20 +101,20 @@ export default function Home() {
             {[
               {
                 step: '1',
-                title: 'Paste GitHub URL or skill code',
-                description: 'Drop in a GitHub repository link or paste code directly',
+                title: 'Paste ClawdHub or GitHub URL',
+                description: 'Drop in a ClawdHub skill link or GitHub repository - we handle both',
                 icon: <Code className="w-8 h-8" />
               },
               {
                 step: '2',
-                title: 'We analyze for 12+ risk vectors',
-                description: 'Static analysis checks for common security vulnerabilities',
+                title: 'We scan for 13 attack vectors',
+                description: 'Static analysis based on real ClawdHub compromises and supply chain attacks',
                 icon: <Search className="w-8 h-8" />
               },
               {
                 step: '3',
-                title: 'Get a security report in seconds',
-                description: 'Detailed findings with severity levels and remediation advice',
+                title: 'Get instant security verdict',
+                description: 'Know if it&apos;s safe to install before it touches your system',
                 icon: <Shield className="w-8 h-8" />
               }
             ].map((item, index) => (
@@ -138,19 +141,94 @@ export default function Home() {
         </div>
       </section>
 
+      {/* Why This Exists */}
+      <section className="py-20 px-4 bg-warning/5 border-y border-warning/20">
+        <div className="container mx-auto max-w-6xl">
+          <h2 className="text-3xl md:text-4xl font-bold text-center mb-12">The ClawdHub Supply Chain Crisis</h2>
+          
+          <div className="grid md:grid-cols-2 gap-12 items-center">
+            <div>
+              <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-6 mb-8">
+                <h3 className="text-xl font-bold text-red-400 mb-4">What Nick Saraev Exposed:</h3>
+                <ul className="space-y-3 text-red-200">
+                  <li className="flex items-start space-x-3">
+                    <AlertTriangle className="w-5 h-5 text-red-400 mt-0.5 flex-shrink-0" />
+                    <span>ClawdHub has <strong>NO vetting process</strong> - any skill can be published</span>
+                  </li>
+                  <li className="flex items-start space-x-3">
+                    <AlertTriangle className="w-5 h-5 text-red-400 mt-0.5 flex-shrink-0" />
+                    <span>Thousands of Clawdbot instances compromised via Shodan scanning</span>
+                  </li>
+                  <li className="flex items-start space-x-3">
+                    <AlertTriangle className="w-5 h-5 text-red-400 mt-0.5 flex-shrink-0" />
+                    <span>Malicious skills stealing API tokens and sensitive data</span>
+                  </li>
+                  <li className="flex items-start space-x-3">
+                    <AlertTriangle className="w-5 h-5 text-red-400 mt-0.5 flex-shrink-0" />
+                    <span>Supply chain attacks through skill repositories</span>
+                  </li>
+                </ul>
+              </div>
+              
+              <blockquote className="text-lg italic text-muted border-l-4 border-terminal-green pl-6">
+                &quot;Read every file or feed files to AI to check safety&quot;
+                <footer className="text-sm text-muted mt-2">- Nick Saraev&apos;s advice to viewers</footer>
+              </blockquote>
+            </div>
+            
+            <div>
+              <div className="bg-terminal-green/10 border border-terminal-green/30 rounded-xl p-6">
+                <h3 className="text-xl font-bold text-terminal-green mb-4">Our Solution:</h3>
+                <ul className="space-y-3 text-green-200">
+                  <li className="flex items-start space-x-3">
+                    <CheckCircle className="w-5 h-5 text-terminal-green mt-0.5 flex-shrink-0" />
+                    <span>Automated security analysis in seconds (not hours)</span>
+                  </li>
+                  <li className="flex items-start space-x-3">
+                    <CheckCircle className="w-5 h-5 text-terminal-green mt-0.5 flex-shrink-0" />
+                    <span>Direct ClawdHub URL scanning support</span>
+                  </li>
+                  <li className="flex items-start space-x-3">
+                    <CheckCircle className="w-5 h-5 text-terminal-green mt-0.5 flex-shrink-0" />
+                    <span>Detects API token theft attempts</span>
+                  </li>
+                  <li className="flex items-start space-x-3">
+                    <CheckCircle className="w-5 h-5 text-terminal-green mt-0.5 flex-shrink-0" />
+                    <span>Identifies webhook data exfiltration</span>
+                  </li>
+                  <li className="flex items-start space-x-3">
+                    <CheckCircle className="w-5 h-5 text-terminal-green mt-0.5 flex-shrink-0" />
+                    <span>13+ security checks based on real attack vectors</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+          
+          <div className="text-center mt-12">
+            <p className="text-xl text-warning font-semibold">
+              Don&apos;t be the next victim. Scan before you install.
+            </p>
+          </div>
+        </div>
+      </section>
+
       {/* Risk Categories */}
       <section className="py-20 px-4">
         <div className="container mx-auto max-w-6xl">
-          <h2 className="text-3xl md:text-4xl font-bold text-center mb-16">What We Scan For</h2>
+          <h2 className="text-3xl md:text-4xl font-bold text-center mb-16">13 Security Checks</h2>
           
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {[
-              { title: 'Data exfiltration', icon: <Network className="w-6 h-6" />, color: 'text-red-400' },
+              { title: 'API token theft', icon: <Key className="w-6 h-6" />, color: 'text-red-400' },
+              { title: 'Webhook data exfiltration', icon: <Network className="w-6 h-6" />, color: 'text-red-400' },
+              { title: 'Shell command execution', icon: <Code className="w-6 h-6" />, color: 'text-red-400' },
               { title: 'Prompt injection', icon: <AlertTriangle className="w-6 h-6" />, color: 'text-orange-400' },
-              { title: 'Secrets exposure', icon: <Key className="w-6 h-6" />, color: 'text-yellow-400' },
-              { title: 'Unauthorized network access', icon: <Network className="w-6 h-6" />, color: 'text-red-400' },
+              { title: 'Hardcoded credentials', icon: <Key className="w-6 h-6" />, color: 'text-yellow-400' },
               { title: 'File system abuse', icon: <FileX className="w-6 h-6" />, color: 'text-orange-400' },
-              { title: 'Privilege escalation', icon: <Zap className="w-6 h-6" />, color: 'text-red-400' },
+              { title: 'Dynamic code execution', icon: <Zap className="w-6 h-6" />, color: 'text-red-400' },
+              { title: 'Obfuscated malware', icon: <Code className="w-6 h-6" />, color: 'text-orange-400' },
+              { title: 'Excessive permissions', icon: <Shield className="w-6 h-6" />, color: 'text-yellow-400' },
             ].map((category, index) => (
               <motion.div
                 key={index}
@@ -185,7 +263,7 @@ export default function Home() {
                       : 'bg-muted/20 text-muted hover:bg-muted/30'
                   }`}
                 >
-                  GitHub URL
+                  ClawdHub / GitHub URL
                 </button>
                 <button
                   onClick={() => setInputType('code')}
@@ -204,7 +282,7 @@ export default function Home() {
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder="https://github.com/username/repo or https://github.com/username/repo/blob/main/file.ts"
+                  placeholder="https://claudhub.ai/skills/username/skillname or https://github.com/username/repo"
                   className="w-full bg-black/50 border border-muted/30 rounded-lg px-4 py-3 text-dark-fg placeholder-muted focus:outline-none focus:border-terminal-green"
                 />
               ) : (
@@ -260,7 +338,7 @@ export default function Home() {
             <p className="text-2xl font-bold text-terminal-green">
               <CountUpAnimation target={1247} />+ skills scanned
             </p>
-            <p className="text-muted mt-2">Protecting developers every day</p>
+            <p className="text-muted mt-2">Protecting developers from ClawdHub supply chain attacks</p>
           </motion.div>
         </div>
       </section>

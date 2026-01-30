@@ -1,18 +1,30 @@
-# SkillScan - Security Scanner for Claude Code Skills
+# SkillScan - ClawdHub Security Scanner
 
-A fast, free security scanner for Claude Code skills and MCP servers. Analyzes code for 12+ security risk vectors using static analysis.
+**Every skill is guilty until proven safe.**
+
+A fast, free security scanner for ClawdHub skills, Claude Code skills, and MCP servers. Born from the viral "It Got Worse - Clawdbot" video exposing the ClawdHub supply chain crisis.
+
+## The ClawdHub Supply Chain Crisis
+
+Nick Saraev's viral "It Got Worse - Clawdbot" video exposed:
+- **No vetting process** on ClawdHub - malicious skills published freely
+- **Thousands of compromised Clawdbot instances** via Shodan scanning
+- **API token theft** through malicious skill instructions
+- **Supply chain attacks** via skill repositories
+
+His advice? "Read every file or feed files to AI to check safety." **We automate that.**
 
 ## Features
 
-- 🔒 **Static Security Analysis** - Scans for 12+ security risk categories
-- ⚡ **Fast Scanning** - No AI needed, pure regex-based pattern matching
-- 🐙 **GitHub Integration** - Scan entire repositories or individual files
-- 🎯 **Risk Assessment** - Get scored reports with severity levels
-- 🌙 **Dark Mode UI** - Terminal-inspired security-focused design
+- 🔒 **ClawdHub Attack Detection** - Scans for real attack vectors from the crisis
+- ⚡ **Instant Scanning** - No AI needed, pure regex-based pattern matching
+- 🎯 **ClawdHub + GitHub Support** - Paste ClawdHub URLs directly
+- 📊 **Risk Scoring** - 0-100 security score with A-F grades
+- 🌙 **Security-Focused UI** - Built by and for security-conscious developers
 
-## Security Checks
+## 13 Security Checks
 
-SkillScan detects the following security risks:
+Based on real ClawdHub compromises and supply chain attacks:
 
 1. **Shell Command Execution** - `exec()`, `spawn()`, `child_process` usage
 2. **Network Requests** - HTTP/HTTPS calls to external URLs
@@ -22,12 +34,18 @@ SkillScan detects the following security risks:
 6. **Base64 Encoding** - Potential data exfiltration encoding
 7. **Obfuscated Code** - Minified, hex-encoded, or suspicious patterns
 8. **Prompt Injection** - "Ignore previous instructions" type patterns
-9. **Credential Patterns** - Hardcoded API keys, passwords, tokens
-10. **Suspicious URLs** - Pastebin, webhooks, localhost, ngrok, etc.
-11. **Package Analysis** - Typosquatting, malicious packages in package.json
-12. **Excessive Permissions** - Skills requesting too many tool accesses
+9. **API Token Stealing** - Attempts to extract OpenAI/Anthropic keys ⭐ NEW
+10. **Credential Patterns** - Hardcoded API keys, passwords, tokens
+11. **Data Exfiltration Webhooks** - Webhook URLs for stealing data ⭐ NEW
+12. **Package Analysis** - Typosquatting, malicious packages in package.json
+13. **Excessive Permissions** - Skills requesting too many tool accesses
 
 ## Usage
+
+### Scan ClawdHub Skill
+```
+https://claudhub.ai/skills/username/skillname
+```
 
 ### Scan GitHub Repository
 ```
@@ -41,6 +59,17 @@ https://github.com/username/repo/blob/main/file.ts
 
 ### Scan Code Directly
 Paste your skill code directly into the scanner.
+
+## Why SkillScan Exists
+
+ClawdHub has **zero vetting**. Any skill can be published. The Nick Saraev video showed:
+
+1. Malicious skills stealing API tokens
+2. Thousands of compromised Clawdbot instances
+3. Supply chain attacks through skill repositories
+4. Zero protection for end users
+
+**Don't be the next victim.** Scan before you install.
 
 ## API
 

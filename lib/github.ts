@@ -10,14 +10,19 @@ export class GitHubFetcher {
    * e.g. https://clawdhub.com/skills/some-skill -> GitHub repo URL
    */
   private static convertClawdHubUrl(url: string): string {
-    // Match clawdhub.com or molthub.com skill URLs
-    const clawdMatch = url.match(/(?:clawdhub|molthub)\.com\/(?:skills?|packages?)\/([^\/\s?#]+)/i);
-    if (clawdMatch) {
-      // ClawdHub skills typically map to GitHub repos. 
-      // For now, return as-is and let parseGitHubUrl handle the fallback.
-      // In future, we could query ClawdHub's API for the source repo.
-      return url;
+    // Convert ClawdHub URLs to GitHub URLs
+    // ClawdHub format: https://claudhub.ai/skills/username/skillname
+    // or https://molthub.ai/skills/username/skillname
+    
+    if (url.includes('claudhub.ai/skills/') || url.includes('molthub.ai/skills/')) {
+      // Extract username and repo name from ClawdHub URL
+      const match = url.match(/(?:claudhub|molthub)\.ai\/skills\/([^\/]+)\/([^\/\?]+)/);
+      if (match) {
+        const [, username, skillname] = match;
+        return `https://github.com/${username}/${skillname}`;
+      }
     }
+    
     return url;
   }
 
@@ -70,23 +75,6 @@ export class GitHubFetcher {
       content,
       path: filename
     };
-  }
-
-  static convertClawdHubUrl(url: string): string {
-    // Convert ClawdHub URLs to GitHub URLs
-    // ClawdHub format: https://claudhub.ai/skills/username/skillname
-    // or https://molthub.ai/skills/username/skillname
-    
-    if (url.includes('claudhub.ai/skills/') || url.includes('molthub.ai/skills/')) {
-      // Extract username and repo name from ClawdHub URL
-      const match = url.match(/(?:claudhub|molthub)\.ai\/skills\/([^\/]+)\/([^\/\?]+)/);
-      if (match) {
-        const [, username, skillname] = match;
-        return `https://github.com/${username}/${skillname}`;
-      }
-    }
-    
-    return url;
   }
 
   private static parseGitHubUrl(url: string): { owner: string; repo: string; branch: string } | null {

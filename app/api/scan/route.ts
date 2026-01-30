@@ -17,27 +17,38 @@ export async function POST(request: NextRequest) {
     let files: GitHubFile[] = [];
 
     if (body.url) {
-      // Handle GitHub URL
-      if (body.url.includes('github.com') || body.url.includes('githubusercontent.com')) {
+      // Handle GitHub and ClawdHub URLs
+      if (body.url.includes('github.com') || 
+          body.url.includes('githubusercontent.com') ||
+          body.url.includes('claudhub.ai') ||
+          body.url.includes('molthub.ai')) {
         try {
           if (body.url.includes('/blob/') || body.url.includes('raw.githubusercontent.com')) {
             // Single file URL
             const file = await GitHubFetcher.fetchSingleFile(body.url);
             files = [file];
           } else {
-            // Repository URL
+            // Repository URL (including ClawdHub)
             files = await GitHubFetcher.fetchRepo(body.url);
           }
         } catch (error) {
-          console.error('GitHub fetch error:', error);
-          return NextResponse.json(
-            { error: 'Failed to fetch from GitHub. Please check the URL and try again.' },
-            { status: 400 }
-          );
+          console.error('Fetch error:', error);
+          
+          if (body.url.includes('claudhub.ai') || body.url.includes('molthub.ai')) {
+            return NextResponse.json(
+              { error: 'Failed to fetch from ClawdHub. The skill may not exist or the GitHub repository is private/deleted.' },
+              { status: 400 }
+            );
+          } else {
+            return NextResponse.json(
+              { error: 'Failed to fetch from GitHub. Please check the URL and try again.' },
+              { status: 400 }
+            );
+          }
         }
       } else {
         return NextResponse.json(
-          { error: 'Only GitHub URLs are supported' },
+          { error: 'Only GitHub and ClawdHub URLs are supported' },
           { status: 400 }
         );
       }

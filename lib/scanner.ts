@@ -63,15 +63,15 @@ export class SecurityScanner {
     // 10. Credential patterns
     this.checkCredentialPatterns(content, file, lines);
 
-    // 10. Suspicious URLs
+    // 11. Suspicious URLs
     this.checkSuspiciousUrls(content, file, lines);
 
-    // 11. Package.json analysis
+    // 12. Package.json analysis
     if (file.name === 'package.json') {
       this.checkPackageJson(content, file);
     }
 
-    // 12. Excessive permissions
+    // 13. Excessive permissions
     if (file.name === 'SKILL.md' || file.name === 'package.json') {
       this.checkPermissions(content, file, lines);
     }
@@ -352,12 +352,21 @@ export class SecurityScanner {
       'hooks.slack.com',
       'webhook.site',
       'requestbin.com',
+      'pipedream.com',
+      'zapier.com/hooks',
       'ngrok.io',
       'bit.ly',
       'tinyurl.com',
       'localhost:',
       '127.0.0.1:',
       '0.0.0.0:'
+    ];
+
+    // Check for webhook patterns specifically
+    const webhookPatterns = [
+      /webhook/gi,
+      /hooks?\.\w+\.(com|ai|org)/gi,
+      /\/api\/webhooks?\//gi
     ];
 
     const urlPattern = /https?:\/\/[^\s\)'">\]]+/gi;
@@ -372,19 +381,71 @@ export class SecurityScanner {
         url.toLowerCase().includes(domain.toLowerCase())
       );
 
-      if (isSuspicious) {
+      const isWebhook = webhookPatterns.some(pattern => pattern.test(url));
+
+      if (isSuspicious || isWebhook) {
+        const severity = isWebhook ? 'critical' : 'critical';
+        const title = isWebhook ? 'Data exfiltration webhook detected' : 'Suspicious URL detected';
+        const description = isWebhook 
+          ? 'Code contains webhook URLs commonly used for data exfiltration - a key attack vector exposed in ClawdHub compromises.'
+          : 'Code contains URLs to services commonly used for data exfiltration or command & control.';
+
         this.findings.push({
-          severity: 'critical',
-          category: 'Suspicious URLs',
-          title: 'Suspicious URL detected',
-          description: 'Code contains URLs to services commonly used for data exfiltration or command & control.',
+          severity,
+          category: 'Data Exfiltration',
+          title,
+          description,
           file: file.name,
           line: lineNumber,
           snippet: snippet,
-          remediation: 'Review the purpose of external URLs and ensure they are legitimate and necessary.'
+          remediation: isWebhook 
+            ? 'Remove webhook URLs. Legitimate integrations should use official APIs with proper authentication.'
+            : 'Review the purpose of external URLs and ensure they are legitimate and necessary.'
         });
       }
     }
+  }
+
+  private checkApiTokenStealing(content: string, file: GitHubFile, lines: string[]): void {
+    const tokenStealingPatterns = [
+      // Direct API key access attempts
+      /(?:openai|anthropic|claude).*(?:key|token|api)/gi,
+      /api[_-]?key.*(?:openai|anthropic|claude)/gi,
+      
+      // Prompt attempts to extract tokens
+      /(?:what|show|give|tell).*(?:api|token|key|secret)/gi,
+      /(?:api|token|key|secret).*(?:is|value|equals|set to)/gi,
+      
+      // Environment variable fishing
+      /process\.env.*(?:openai|anthropic|claude|api|key|token)/gi,
+      /env\[.*(?:key|token|api)/gi,
+      
+      // Skill instructions that try to extract secrets
+      /instruction.*(?:api|key|token|secret)/gi,
+      /system.*(?:show|reveal|give|tell).*(?:key|token|api)/gi,
+      
+      // Common exfiltration methods
+      /(?:console\.log|print|alert|fetch|post).*(?:api|key|token)/gi,
+    ];
+
+    tokenStealingPatterns.forEach(pattern => {
+      const matches = Array.from(content.matchAll(pattern));
+      for (const match of matches) {
+        const lineNumber = this.getLineNumber(content, match.index!);
+        const snippet = lines[lineNumber - 1]?.trim();
+
+        this.findings.push({
+          severity: 'critical',
+          category: 'API Token Theft',
+          title: 'API token stealing attempt detected',
+          description: 'Code appears to attempt stealing API tokens - a primary attack vector in compromised ClawdHub skills.',
+          file: file.name,
+          line: lineNumber,
+          snippet: snippet,
+          remediation: 'Remove any attempts to access, log, or transmit API keys or tokens. This is a red flag for malicious skills.'
+        });
+      }
+    });
   }
 
   private checkPackageJson(content: string, file: GitHubFile): void {

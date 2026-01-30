@@ -60,6 +60,7 @@ export default function Home() {
   const [isScanning, setIsScanning] = useState(false);
   const [result, setResult] = useState<ScanResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   // Auto-detect input type based on content
   const detectInputType = (value: string): 'url' | 'code' => {
@@ -415,8 +416,36 @@ export default function Home() {
                   className="text-muted hover:text-white transition-colors"
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
+                  onClick={() => {
+                    const code = `curl -X POST https://skillscan-rouge.vercel.app/api/scan \\\n  -H "Content-Type: application/json" \\\n  -d '{"url": "https://github.com/user/repo"}'`;
+                    navigator.clipboard.writeText(code).then(() => {
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 2000);
+                    });
+                  }}
                 >
-                  <Copy className="w-4 h-4" />
+                  <AnimatePresence mode="wait">
+                    {copied ? (
+                      <motion.div
+                        key="check"
+                        initial={{ scale: 0, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        exit={{ scale: 0, opacity: 0 }}
+                        transition={{ type: "spring", stiffness: 500, damping: 25 }}
+                      >
+                        <CheckCircle className="w-4 h-4 text-green-400" />
+                      </motion.div>
+                    ) : (
+                      <motion.div
+                        key="copy"
+                        initial={{ scale: 0, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        exit={{ scale: 0, opacity: 0 }}
+                      >
+                        <Copy className="w-4 h-4" />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </motion.button>
               </div>
               <code className="text-sm">

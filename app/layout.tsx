@@ -1,13 +1,18 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  themeColor: 'hsl(355, 78%, 58%)',
+}
 
 export const metadata: Metadata = {
   title: "SkillScan - Security Scanner for AI Skills & Code",
   description: "Scan Claude Code skills, MCP servers, and GitHub repositories for security vulnerabilities before they access your system. Fast, comprehensive security analysis with detailed reporting.",
   keywords: "claude code, mcp, security scanner, static analysis, skill scanner, ai security, vulnerability scanner, github security, code analysis",
   authors: [{ name: "SkillScan Team" }, { name: "ninetynine.digital" }],
-  themeColor: "hsl(355, 78%, 58%)",
-  viewport: "width=device-width, initial-scale=1",
+  metadataBase: new URL('https://skillscan.ai'),
   openGraph: {
     title: "SkillScan - Security Scanner for AI Skills",
     description: "Comprehensive security analysis for Claude Code skills and repositories. Know what you're installing before it accesses your system.",

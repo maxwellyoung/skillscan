@@ -1,4 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -16,12 +17,81 @@ body {
   margin: 0;
   padding: 0;
   min-height: 100vh;
-  background: #09090b;
-  color: #fafafa;
+  background: hsl(220, 15%, 4%);
+  color: hsl(0, 0%, 90%);
+}
+
+/* Editorial serif headings */
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Newsreader', 'Charter', 'Georgia', serif;
+  font-feature-settings: 'kern' 1, 'liga' 1;
+}
+
+/* Spring physics animations */
+.spring-enter {
+  animation: spring-in 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+/* Code syntax highlighting */
+.syntax-highlight {
+  background: hsl(220, 15%, 8%);
+  border: 1px solid hsl(220, 15%, 15%);
+  border-radius: 8px;
+  padding: 1rem;
+  font-family: 'ui-monospace', 'SFMono-Regular', monospace;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  overflow-x: auto;
+}
+
+.syntax-highlight .line-number {
+  color: hsl(220, 15%, 40%);
+  user-select: none;
+  margin-right: 1rem;
+  display: inline-block;
+  width: 2rem;
+  text-align: right;
+}
+
+/* Scanning animation */
+@keyframes scanning {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+.scanning-line {
+  position: relative;
+  overflow: hidden;
+}
+
+.scanning-line::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 20px;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, hsl(355, 78%, 58%), transparent);
+  animation: scanning 2s infinite;
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+  
+  /* Editorial spacing */
+  .editorial-spacing {
+    line-height: 1.7;
+    letter-spacing: -0.01em;
+  }
+  
+  /* Spring transitions */
+  .spring-bounce {
+    transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  }
+  
+  .spring-bounce:hover {
+    transform: translateY(-2px);
   }
 }

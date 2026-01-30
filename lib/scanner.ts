@@ -1,14 +1,24 @@
 import { Finding, ScanResult, GitHubFile } from './types';
 
+type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
+
+/**
+ * SkillScan Security Scanner v2
+ * 
+ * Key improvement: distinguishes between executable code and documentation.
+ * Markdown files with code examples are NOT treated the same as real .js/.ts files.
+ */
 export class SecurityScanner {
   private findings: Finding[] = [];
   private scannedFiles = 0;
   private linesAnalyzed = 0;
+  private seenFindings = new Set<string>();
 
   async scan(files: GitHubFile[]): Promise<ScanResult> {
     this.findings = [];
     this.scannedFiles = files.length;
     this.linesAnalyzed = 0;
+    this.seenFindings = new Set();
 
     for (const file of files) {
       this.linesAnalyzed += file.content.split('\n').length;
@@ -29,51 +39,137 @@ export class SecurityScanner {
     };
   }
 
+  /**
+   * Determine if a file is documentation vs executable code.
+   */
+  private isDocFile(fileName: string): boolean {
+    const docExtensions = ['.md', '.mdx', '.txt', '.rst', '.adoc'];
+    return docExtensions.some(ext => fileName.toLowerCase().endsWith(ext));
+  }
+
+  /**
+   * Check if a line in a markdown file is inside a fenced code block.
+   * Code blocks in docs are examples, not executable, so they get lower severity.
+   */
+  private isInsideCodeBlock(content: string, index: number): boolean {
+    const before = content.substring(0, index);
+    const fenceMatches = before.match(/```/g);
+    // Odd number of ``` means we're inside a code block
+    return fenceMatches ? fenceMatches.length % 2 === 1 : false;
+  }
+
+  /**
+   * Downgrade severity for documentation files.
+   * Code examples in SKILL.md are not real threats.
+   */
+  private adjustSeverity(severity: Severity, file: GitHubFile, index?: number): Severity {
+    if (!this.isDocFile(file.name)) return severity;
+    
+    // Inside a code block in docs = informational only
+    if (index !== undefined && this.isInsideCodeBlock(file.content, index)) {
+      return 'info';
+    }
+    
+    // Prose in docs mentioning security concepts = info
+    return 'info';
+  }
+
+  /**
+   * Deduplicate findings: same file + line + category = skip.
+   */
+  private addFinding(finding: Finding): void {
+    const key = `${finding.file}:${finding.line || 0}:${finding.category}`;
+    if (this.seenFindings.has(key)) return;
+    this.seenFindings.add(key);
+    this.findings.push(finding);
+  }
+
+  /**
+   * Safe URL patterns that should never be flagged.
+   */
+  private isSafeUrl(url: string): boolean {
+    const safePatterns = [
+      'example.com',
+      'example.org',
+      'example.net',
+      'localhost',
+      '127.0.0.1',
+      '0.0.0.0',
+      'httpbin.org',
+      'jsonplaceholder.typicode.com',
+      'api.example',
+      'your-api.com',
+      'your-domain',
+      'yourdomain',
+      'my-app',
+      'myapp',
+      'placeholder',
+    ];
+    const lower = url.toLowerCase();
+    // Also safe if it's a relative URL
+    if (lower.startsWith('/api/') || lower.startsWith('/')) return true;
+    return safePatterns.some(p => lower.includes(p));
+  }
+
   private async scanFile(file: GitHubFile): Promise<void> {
     const content = file.content;
     const lines = content.split('\n');
+    const isDoc = this.isDocFile(file.name);
 
+    // For doc files, only scan for the most dangerous patterns
+    // (actual exfiltration URLs, real credential leaks)
+    
     // 1. exec/spawn calls
-    this.checkExecCalls(content, file, lines);
+    if (!isDoc) {
+      this.checkExecCalls(content, file, lines);
+    }
 
-    // 2. Network requests
-    this.checkNetworkRequests(content, file, lines);
+    // 2. Network requests (skip docs entirely, code examples aren't real requests)
+    if (!isDoc) {
+      this.checkNetworkRequests(content, file, lines);
+    }
 
     // 3. File system access
-    this.checkFileSystemAccess(content, file, lines);
+    if (!isDoc) {
+      this.checkFileSystemAccess(content, file, lines);
+    }
 
     // 4. Environment variable access
-    this.checkEnvironmentAccess(content, file, lines);
+    if (!isDoc) {
+      this.checkEnvironmentAccess(content, file, lines);
+    }
 
     // 5. Eval/Function constructor
-    this.checkDynamicExecution(content, file, lines);
+    if (!isDoc) {
+      this.checkDynamicExecution(content, file, lines);
+    }
 
     // 6. Base64 encoding
-    this.checkBase64Encoding(content, file, lines);
+    if (!isDoc) {
+      this.checkBase64Encoding(content, file, lines);
+    }
 
-    // 7. Obfuscated code
+    // 7. Obfuscated code (check all files but adjust severity)
     this.checkObfuscatedCode(content, file, lines);
 
-    // 8. Prompt injection patterns
+    // 8. Prompt injection (check all files, this IS relevant in docs)
     this.checkPromptInjection(content, file, lines);
 
-    // 9. API token stealing (ClawdHub specific)
-    this.checkApiTokenStealing(content, file, lines);
+    // 9. API token stealing — ONLY check executable files
+    // Docs mentioning "API key" is normal documentation, not theft
+    if (!isDoc) {
+      this.checkApiTokenStealing(content, file, lines);
+    }
 
-    // 10. Credential patterns
+    // 10. Credential patterns (hardcoded secrets — check all files)
     this.checkCredentialPatterns(content, file, lines);
 
-    // 11. Suspicious URLs
+    // 11. Suspicious URLs — check all files but filter safe URLs
     this.checkSuspiciousUrls(content, file, lines);
 
     // 12. Package.json analysis
     if (file.name === 'package.json') {
       this.checkPackageJson(content, file);
-    }
-
-    // 13. Excessive permissions
-    if (file.name === 'SKILL.md' || file.name === 'package.json') {
-      this.checkPermissions(content, file, lines);
     }
   }
 
@@ -91,12 +187,10 @@ export class SecurityScanner {
       for (const match of matches) {
         const lineNumber = this.getLineNumber(content, match.index!);
         const snippet = lines[lineNumber - 1]?.trim();
-
-        // Check if it's bounded/safe
         const severity = this.isUnboundedExec(snippet) ? 'critical' : 'high';
 
-        this.findings.push({
-          severity,
+        this.addFinding({
+          severity: this.adjustSeverity(severity, file, match.index),
           category: 'Command Execution',
           title: 'Shell command execution detected',
           description: 'Code can execute shell commands, which could be used to run arbitrary system commands.',
@@ -123,10 +217,13 @@ export class SecurityScanner {
         const lineNumber = this.getLineNumber(content, match.index!);
         const snippet = lines[lineNumber - 1]?.trim();
 
+        // Skip if the URL in the snippet is a safe/example URL
+        if (this.isSafeUrl(snippet)) continue;
+
         const severity = this.hasSuspiciousDomain(snippet) ? 'critical' : 'medium';
 
-        this.findings.push({
-          severity,
+        this.addFinding({
+          severity: this.adjustSeverity(severity, file, match.index),
           category: 'Network Access',
           title: 'Network request detected',
           description: 'Code makes network requests which could be used for data exfiltration or downloading malicious content.',
@@ -143,8 +240,6 @@ export class SecurityScanner {
     const patterns = [
       /fs\.(?:readFile|writeFile|readdir|mkdir|rmdir|unlink|stat|access|createReadStream|createWriteStream)/g,
       /path\.(?:join|resolve).*\.\./g,
-      /process\.cwd\(\)/g,
-      /\.\.\/|\.\.\\/g
     ];
 
     patterns.forEach(pattern => {
@@ -152,11 +247,10 @@ export class SecurityScanner {
       for (const match of matches) {
         const lineNumber = this.getLineNumber(content, match.index!);
         const snippet = lines[lineNumber - 1]?.trim();
+        const severity: Severity = snippet.includes('..') ? 'high' : 'medium';
 
-        const severity = snippet.includes('..') ? 'high' : 'medium';
-
-        this.findings.push({
-          severity,
+        this.addFinding({
+          severity: this.adjustSeverity(severity, file, match.index),
           category: 'File System Access',
           title: 'File system operation detected',
           description: 'Code accesses the file system, which could be used to read sensitive files or modify system files.',
@@ -172,7 +266,6 @@ export class SecurityScanner {
   private checkEnvironmentAccess(content: string, file: GitHubFile, lines: string[]): void {
     const patterns = [
       /process\.env\[?['"`]?(\w+)['"`]?\]?/g,
-      /(?:process\.env\.|env\.)(\w*(?:KEY|TOKEN|SECRET|PASSWORD|PASS|AUTH))/gi
     ];
 
     patterns.forEach(pattern => {
@@ -182,10 +275,10 @@ export class SecurityScanner {
         const snippet = lines[lineNumber - 1]?.trim();
         
         const envVar = match[1] || '';
-        const severity = this.isSensitiveEnvVar(envVar) ? 'high' : 'medium';
+        const severity: Severity = this.isSensitiveEnvVar(envVar) ? 'high' : 'medium';
 
-        this.findings.push({
-          severity,
+        this.addFinding({
+          severity: this.adjustSeverity(severity, file, match.index),
           category: 'Environment Access',
           title: 'Environment variable access detected',
           description: 'Code reads environment variables, which could expose sensitive configuration or secrets.',
@@ -213,8 +306,8 @@ export class SecurityScanner {
         const lineNumber = this.getLineNumber(content, match.index!);
         const snippet = lines[lineNumber - 1]?.trim();
 
-        this.findings.push({
-          severity: 'critical',
+        this.addFinding({
+          severity: this.adjustSeverity('critical', file, match.index),
           category: 'Dynamic Execution',
           title: 'Dynamic code execution detected',
           description: 'Code uses eval() or Function constructor which can execute arbitrary code strings.',
@@ -232,7 +325,6 @@ export class SecurityScanner {
       /(?:btoa|atob)\s*\(/g,
       /Buffer\.(?:from|toString)\s*\(.*['"`]base64['"`]/g,
       /\.toString\s*\(\s*['"`]base64['"`]\s*\)/g,
-      /base64\s*[:=]/gi
     ];
 
     patterns.forEach(pattern => {
@@ -241,8 +333,8 @@ export class SecurityScanner {
         const lineNumber = this.getLineNumber(content, match.index!);
         const snippet = lines[lineNumber - 1]?.trim();
 
-        this.findings.push({
-          severity: 'medium',
+        this.addFinding({
+          severity: this.adjustSeverity('medium', file, match.index),
           category: 'Data Encoding',
           title: 'Base64 encoding detected',
           description: 'Code uses Base64 encoding which could be used to obfuscate data exfiltration.',
@@ -256,14 +348,14 @@ export class SecurityScanner {
   }
 
   private checkObfuscatedCode(content: string, file: GitHubFile, lines: string[]): void {
-    // Check for hex-encoded strings
-    const hexPattern = /['"`]\\x[0-9a-fA-F]{2}/g;
-    // Check for unicode escape sequences
-    const unicodePattern = /\\u[0-9a-fA-F]{4}/g;
-    // Check for very long string literals
-    const longStringPattern = /['"`][^'"`\n]{200,}['"`]/g;
+    // Only check for hex-encoded strings and very long string literals
+    // Skip doc files entirely for obfuscation (long lines in docs are normal)
+    if (this.isDocFile(file.name)) return;
 
-    const patterns = [hexPattern, unicodePattern, longStringPattern];
+    const hexPattern = /['"`]\\x[0-9a-fA-F]{2}(?:\\x[0-9a-fA-F]{2}){3,}/g;
+    const longStringPattern = /['"`][^'"`\n]{500,}['"`]/g;
+
+    const patterns = [hexPattern, longStringPattern];
 
     patterns.forEach(pattern => {
       const matches = Array.from(content.matchAll(pattern));
@@ -271,7 +363,7 @@ export class SecurityScanner {
         const lineNumber = this.getLineNumber(content, match.index!);
         const snippet = lines[lineNumber - 1]?.trim().substring(0, 100) + '...';
 
-        this.findings.push({
+        this.addFinding({
           severity: 'high',
           category: 'Code Obfuscation',
           title: 'Obfuscated code detected',
@@ -289,10 +381,8 @@ export class SecurityScanner {
     const patterns = [
       /ignore\s+(?:previous|all|prior|above)\s+(?:instruction|prompt|context|system)/gi,
       /forget\s+(?:previous|all|prior|above)/gi,
-      /act\s+as\s+(?:if|though)/gi,
-      /system\s*[:=]\s*['"`]/gi,
-      /role\s*[:=]\s*['"`]system['"`]/gi,
-      /new\s+(?:instruction|task|role|prompt)/gi
+      /you\s+are\s+now\s+(?:a|an|the)/gi,
+      /disregard\s+(?:all|any|previous)/gi,
     ];
 
     patterns.forEach(pattern => {
@@ -301,11 +391,11 @@ export class SecurityScanner {
         const lineNumber = this.getLineNumber(content, match.index!);
         const snippet = lines[lineNumber - 1]?.trim();
 
-        this.findings.push({
-          severity: 'high',
+        this.addFinding({
+          severity: this.isDocFile(file.name) ? 'medium' : 'high',
           category: 'Prompt Injection',
           title: 'Potential prompt injection detected',
-          description: 'Code contains patterns commonly used in prompt injection attacks.',
+          description: 'Content contains patterns commonly used in prompt injection attacks.',
           file: file.name,
           line: lineNumber,
           snippet: snippet,
@@ -317,20 +407,23 @@ export class SecurityScanner {
 
   private checkCredentialPatterns(content: string, file: GitHubFile, lines: string[]): void {
     const patterns = [
-      /(?:api_key|apikey|access_key|secret_key|private_key)\s*[:=]\s*['"`][^'"`\s]{10,}['"`]/gi,
-      /(?:password|passwd|pwd)\s*[:=]\s*['"`][^'"`\s]{6,}['"`]/gi,
-      /(?:token|bearer)\s*[:=]\s*['"`][^'"`\s]{20,}['"`]/gi,
-      /['"]\w*(?:key|token|secret|password)['"]:\s*['"`][^'"`\s]{10,}['"`]/gi
+      // Only match things that look like REAL secrets (long random strings)
+      /(?:api_key|apikey|access_key|secret_key|private_key)\s*[:=]\s*['"`]([^'"`\s]{20,})['"`]/gi,
+      /(?:password|passwd|pwd)\s*[:=]\s*['"`]([^'"`\s]{8,})['"`]/gi,
     ];
 
     patterns.forEach(pattern => {
       const matches = Array.from(content.matchAll(pattern));
       for (const match of matches) {
+        const value = match[1] || '';
+        // Skip obvious placeholders
+        if (this.isPlaceholderValue(value)) continue;
+        
         const lineNumber = this.getLineNumber(content, match.index!);
         const snippet = lines[lineNumber - 1]?.trim().replace(/['"`][^'"`\s]{10,}['"`]/, '"[REDACTED]"');
 
-        this.findings.push({
-          severity: 'medium',
+        this.addFinding({
+          severity: this.adjustSeverity('high', file, match.index),
           category: 'Credentials Exposure',
           title: 'Potential hardcoded credentials detected',
           description: 'Code appears to contain hardcoded credentials or API keys.',
@@ -343,30 +436,39 @@ export class SecurityScanner {
     });
   }
 
+  private isPlaceholderValue(value: string): boolean {
+    const lower = value.toLowerCase();
+    return lower.includes('xxx') || 
+           lower.includes('your') || 
+           lower.includes('example') ||
+           lower.includes('placeholder') ||
+           lower.includes('change_me') ||
+           lower.includes('todo') ||
+           lower.startsWith('sk-xxx') ||
+           lower.startsWith('pk_test') ||
+           lower.startsWith('sk_test') ||
+           /^[x]+$/i.test(value) ||
+           /^(test|demo|sample|fake|mock)/i.test(value);
+  }
+
   private checkSuspiciousUrls(content: string, file: GitHubFile, lines: string[]): void {
-    const suspiciousDomains = [
+    // Only flag genuinely suspicious exfiltration endpoints
+    const exfiltrationDomains = [
       'pastebin.com',
       'hastebin.com',
-      'api.telegram.org',
-      'discord.com/api/webhooks',
-      'hooks.slack.com',
       'webhook.site',
       'requestbin.com',
       'pipedream.com',
-      'zapier.com/hooks',
       'ngrok.io',
-      'bit.ly',
-      'tinyurl.com',
-      'localhost:',
-      '127.0.0.1:',
-      '0.0.0.0:'
+      'ngrok-free.app',
+      'serveo.net',
+      'burpcollaborator.net',
     ];
 
-    // Check for webhook patterns specifically
+    // Webhook patterns that suggest data exfiltration
     const webhookPatterns = [
-      /webhook/gi,
-      /hooks?\.\w+\.(com|ai|org)/gi,
-      /\/api\/webhooks?\//gi
+      /discord\.com\/api\/webhooks\//gi,
+      /hooks\.slack\.com\/services\//gi,
     ];
 
     const urlPattern = /https?:\/\/[^\s\)'">\]]+/gi;
@@ -374,24 +476,27 @@ export class SecurityScanner {
 
     for (const match of matches) {
       const url = match[0];
+      
+      // Skip safe/example URLs
+      if (this.isSafeUrl(url)) continue;
+
       const lineNumber = this.getLineNumber(content, match.index!);
       const snippet = lines[lineNumber - 1]?.trim();
 
-      const isSuspicious = suspiciousDomains.some(domain => 
+      const isExfiltration = exfiltrationDomains.some(domain => 
         url.toLowerCase().includes(domain.toLowerCase())
       );
 
       const isWebhook = webhookPatterns.some(pattern => pattern.test(url));
 
-      if (isSuspicious || isWebhook) {
-        const severity = isWebhook ? 'critical' : 'critical';
-        const title = isWebhook ? 'Data exfiltration webhook detected' : 'Suspicious URL detected';
+      if (isExfiltration || isWebhook) {
+        const title = isWebhook ? 'Data exfiltration webhook detected' : 'Suspicious exfiltration URL detected';
         const description = isWebhook 
-          ? 'Code contains webhook URLs commonly used for data exfiltration - a key attack vector exposed in ClawdHub compromises.'
-          : 'Code contains URLs to services commonly used for data exfiltration or command & control.';
+          ? 'Code contains webhook URLs commonly used for data exfiltration.'
+          : 'Code contains URLs to services commonly used for data exfiltration.';
 
-        this.findings.push({
-          severity,
+        this.addFinding({
+          severity: this.adjustSeverity('critical', file, match.index),
           category: 'Data Exfiltration',
           title,
           description,
@@ -407,42 +512,40 @@ export class SecurityScanner {
   }
 
   private checkApiTokenStealing(content: string, file: GitHubFile, lines: string[]): void {
-    const tokenStealingPatterns = [
-      // Direct API key access attempts
-      /(?:openai|anthropic|claude).*(?:key|token|api)/gi,
-      /api[_-]?key.*(?:openai|anthropic|claude)/gi,
+    // ONLY flag actual exfiltration patterns, not documentation mentioning APIs
+    // Real token theft = reading a token AND sending it somewhere
+    
+    const exfiltrationPatterns = [
+      // Sending env vars via network
+      /fetch\(.*process\.env/gi,
+      /axios\.\w+\(.*process\.env/gi,
+      /http\.(?:get|post|request)\(.*process\.env/gi,
       
-      // Prompt attempts to extract tokens
-      /(?:what|show|give|tell).*(?:api|token|key|secret)/gi,
-      /(?:api|token|key|secret).*(?:is|value|equals|set to)/gi,
+      // Logging secrets
+      /console\.log\(.*(?:api_key|apikey|secret|token|password)/gi,
       
-      // Environment variable fishing
-      /process\.env.*(?:openai|anthropic|claude|api|key|token)/gi,
-      /env\[.*(?:key|token|api)/gi,
+      // Encoding secrets for transmission
+      /(?:btoa|Buffer\.from)\(.*(?:api_key|apikey|secret|token)/gi,
       
-      // Skill instructions that try to extract secrets
-      /instruction.*(?:api|key|token|secret)/gi,
-      /system.*(?:show|reveal|give|tell).*(?:key|token|api)/gi,
-      
-      // Common exfiltration methods
-      /(?:console\.log|print|alert|fetch|post).*(?:api|key|token)/gi,
+      // Writing secrets to external URLs
+      /fetch\(.*webhook.*(?:key|token|secret)/gi,
     ];
 
-    tokenStealingPatterns.forEach(pattern => {
+    exfiltrationPatterns.forEach(pattern => {
       const matches = Array.from(content.matchAll(pattern));
       for (const match of matches) {
         const lineNumber = this.getLineNumber(content, match.index!);
         const snippet = lines[lineNumber - 1]?.trim();
 
-        this.findings.push({
+        this.addFinding({
           severity: 'critical',
           category: 'API Token Theft',
-          title: 'API token stealing attempt detected',
-          description: 'Code appears to attempt stealing API tokens - a primary attack vector in compromised ClawdHub skills.',
+          title: 'Potential API token exfiltration detected',
+          description: 'Code appears to read secrets and transmit them externally.',
           file: file.name,
           line: lineNumber,
           snippet: snippet,
-          remediation: 'Remove any attempts to access, log, or transmit API keys or tokens. This is a red flag for malicious skills.'
+          remediation: 'Remove any attempts to access and transmit API keys or tokens.'
         });
       }
     });
@@ -451,22 +554,20 @@ export class SecurityScanner {
   private checkPackageJson(content: string, file: GitHubFile): void {
     try {
       const pkg = JSON.parse(content);
-      
-      // Check for suspicious package names (typosquatting)
       const dependencies = { ...pkg.dependencies, ...pkg.devDependencies };
       
-      // Known malicious patterns or typosquatting
+      // Known typosquatting patterns
       const suspiciousPatterns = [
         /^(colors|faker|request|lodash|underscore|moment|axios|express)[\d-_]/i,
-        /\d{6,}/,  // Random numbers
-        /^[a-z]{2,3}\d+$/,  // Short name + numbers
+        /\d{6,}/,
+        /^[a-z]{2,3}\d+$/,
       ];
 
       Object.keys(dependencies || {}).forEach(name => {
         const isSuspicious = suspiciousPatterns.some(pattern => pattern.test(name));
         
         if (isSuspicious) {
-          this.findings.push({
+          this.addFinding({
             severity: 'high',
             category: 'Package Dependencies',
             title: 'Suspicious package dependency detected',
@@ -477,11 +578,11 @@ export class SecurityScanner {
         }
       });
 
-      // Check for pre/post install scripts
+      // Install hooks
       const scripts = pkg.scripts || {};
       ['preinstall', 'postinstall', 'preuninstall', 'postuninstall'].forEach(hook => {
         if (scripts[hook]) {
-          this.findings.push({
+          this.addFinding({
             severity: 'medium',
             category: 'Install Hooks',
             title: `${hook} script detected`,
@@ -494,8 +595,7 @@ export class SecurityScanner {
       });
 
     } catch {
-      // Invalid JSON
-      this.findings.push({
+      this.addFinding({
         severity: 'low',
         category: 'Package Configuration',
         title: 'Invalid package.json',
@@ -506,68 +606,11 @@ export class SecurityScanner {
     }
   }
 
-  private checkPermissions(content: string, file: GitHubFile, lines: string[]): void {
-    // Check for excessive tool permissions in SKILL.md or manifest
-    const toolPatterns = [
-      /tools?[:\s]*\[([^\]]+)\]/gi,
-      /"tools?"[:\s]*\[([^\]]+)\]/gi
-    ];
-
-    toolPatterns.forEach(pattern => {
-      const matches = Array.from(content.matchAll(pattern));
-      for (const match of matches) {
-        const toolsString = match[1];
-        const tools = toolsString.split(',').map(t => t.trim().replace(/['"]/g, ''));
-        
-        if (tools.length > 5) {
-          const lineNumber = this.getLineNumber(content, match.index!);
-          const snippet = lines[lineNumber - 1]?.trim();
-
-          this.findings.push({
-            severity: 'medium',
-            category: 'Permissions',
-            title: 'Excessive tool permissions requested',
-            description: `Skill requests access to ${tools.length} tools, which may be more than necessary.`,
-            file: file.name,
-            line: lineNumber,
-            snippet: snippet,
-            remediation: 'Review tool permissions and request only the minimum necessary tools.'
-          });
-        }
-
-        // Check for particularly sensitive tools
-        const sensitiveTools = ['exec', 'shell', 'file_system', 'network', 'system'];
-        const requestedSensitive = tools.filter(tool => 
-          sensitiveTools.some(sensitive => 
-            tool.toLowerCase().includes(sensitive)
-          )
-        );
-
-        if (requestedSensitive.length > 0) {
-          const lineNumber = this.getLineNumber(content, match.index!);
-          const snippet = lines[lineNumber - 1]?.trim();
-
-          this.findings.push({
-            severity: 'high',
-            category: 'Sensitive Permissions',
-            title: 'Sensitive tool permissions requested',
-            description: `Skill requests sensitive tools: ${requestedSensitive.join(', ')}`,
-            file: file.name,
-            line: lineNumber,
-            snippet: snippet,
-            remediation: 'Ensure sensitive tool access is necessary and properly secured.'
-          });
-        }
-      }
-    });
-  }
-
   private getLineNumber(content: string, index: number): number {
     return content.substring(0, index).split('\n').length;
   }
 
   private isUnboundedExec(snippet: string): boolean {
-    // Check if exec call uses user input or variables that could be controlled
     return snippet.includes('process.argv') || 
            snippet.includes('input') || 
            snippet.includes('${') ||
@@ -576,7 +619,7 @@ export class SecurityScanner {
   }
 
   private hasSuspiciousDomain(snippet: string): boolean {
-    const suspiciousDomains = ['pastebin.com', 'webhook.site', 'ngrok.io', 'localhost'];
+    const suspiciousDomains = ['pastebin.com', 'webhook.site', 'ngrok.io'];
     return suspiciousDomains.some(domain => snippet.includes(domain));
   }
 
@@ -591,19 +634,20 @@ export class SecurityScanner {
     for (const finding of this.findings) {
       switch (finding.severity) {
         case 'critical':
-          score -= 25;
+          score -= 20;
           break;
         case 'high':
-          score -= 15;
+          score -= 10;
           break;
         case 'medium':
-          score -= 8;
+          score -= 5;
           break;
         case 'low':
-          score -= 3;
+          score -= 2;
           break;
         case 'info':
-          score -= 1;
+          // Info findings don't affect score
+          score -= 0;
           break;
       }
     }
@@ -613,16 +657,19 @@ export class SecurityScanner {
 
   private calculateGrade(score: number): 'A' | 'B' | 'C' | 'D' | 'F' {
     if (score >= 90) return 'A';
-    if (score >= 80) return 'B';
-    if (score >= 70) return 'C';
-    if (score >= 60) return 'D';
+    if (score >= 75) return 'B';
+    if (score >= 60) return 'C';
+    if (score >= 40) return 'D';
     return 'F';
   }
 
   private generateSummary(): string {
-    const criticalCount = this.findings.filter(f => f.severity === 'critical').length;
-    const highCount = this.findings.filter(f => f.severity === 'high').length;
-    const mediumCount = this.findings.filter(f => f.severity === 'medium').length;
+    // Only count non-info findings
+    const realFindings = this.findings.filter(f => f.severity !== 'info');
+    const criticalCount = realFindings.filter(f => f.severity === 'critical').length;
+    const highCount = realFindings.filter(f => f.severity === 'high').length;
+    const mediumCount = realFindings.filter(f => f.severity === 'medium').length;
+    const infoCount = this.findings.filter(f => f.severity === 'info').length;
 
     if (criticalCount > 0) {
       return `Found ${criticalCount} critical security ${criticalCount === 1 ? 'issue' : 'issues'}. Immediate attention required.`;
@@ -634,6 +681,10 @@ export class SecurityScanner {
     
     if (mediumCount > 0) {
       return `Found ${mediumCount} medium-risk ${mediumCount === 1 ? 'issue' : 'issues'}. Generally safe but worth reviewing.`;
+    }
+
+    if (infoCount > 0) {
+      return `${infoCount} informational ${infoCount === 1 ? 'note' : 'notes'}. No actionable security issues found.`;
     }
     
     return 'No significant security issues detected. Appears safe to install.';

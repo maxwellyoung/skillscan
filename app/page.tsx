@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Inter } from 'next/font/google';
 import { ScanResult, Finding } from '@/lib/types';
+import Link from 'next/link';
 import { 
   AlertTriangle, 
   AlertCircle, 
@@ -20,7 +21,8 @@ import {
   Lock,
   Copy,
   CheckCircle,
-  Loader2
+  Loader2,
+  Github
 } from 'lucide-react';
 
 const inter = Inter({ subsets: ['latin'] });
@@ -115,7 +117,7 @@ export default function Home() {
   return (
     <div className={`min-h-screen bg-background text-foreground ${inter.className}`}>
       {/* Nav */}
-      <nav className="border-b border-muted/20 backdrop-blur-sm sticky top-0 z-50">
+      <nav className="border-b border-white/5 backdrop-blur-sm sticky top-0 z-50 bg-black/80">
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <motion.div 
@@ -125,14 +127,22 @@ export default function Home() {
             >
               SkillScan
             </motion.div>
-            <motion.button 
-              onClick={scrollToScanner}
-              className="text-muted hover:text-white transition-colors text-sm spring-bounce"
-              whileHover={{ y: -1 }}
-              whileTap={{ y: 0 }}
-            >
-              Scan
-            </motion.button>
+            <div className="flex items-center gap-6">
+              <motion.button 
+                onClick={scrollToScanner}
+                className="text-muted hover:text-white transition-colors text-sm"
+                whileHover={{ y: -1 }}
+                whileTap={{ y: 0 }}
+              >
+                Scan
+              </motion.button>
+              <Link href="/pricing" className="text-muted hover:text-white transition-colors text-sm">
+                Pricing
+              </Link>
+              <a href="https://github.com/maxwellyoung/skillscan" target="_blank" rel="noopener noreferrer" className="text-muted hover:text-white transition-colors">
+                <Github className="w-4 h-4" />
+              </a>
+            </div>
           </div>
         </div>
       </nav>
@@ -284,7 +294,7 @@ export default function Home() {
       </section>
 
       {/* How it works */}
-      <section className="py-32 px-6 bg-muted/5">
+      <section className="py-32 px-6 bg-white/[0.02]">
         <div className="max-w-4xl mx-auto">
           <motion.div
             initial={{ opacity: 0, y: 30 }}
@@ -307,7 +317,7 @@ export default function Home() {
               },
               {
                 number: '2', 
-                title: 'We analyze 12 security vectors',
+                title: 'We analyze 13 security vectors',
                 description: 'Static analysis identifies common attack patterns and vulnerabilities.',
                 icon: Shield
               },
@@ -390,7 +400,7 @@ export default function Home() {
       </section>
 
       {/* CLI Section */}
-      <section className="py-32 px-6 bg-muted/5">
+      <section className="py-32 px-6 bg-white/[0.02]">
         <div className="max-w-4xl mx-auto">
           <motion.div
             initial={{ opacity: 0, y: 30 }}
@@ -417,7 +427,7 @@ export default function Home() {
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   onClick={() => {
-                    const code = `curl -X POST https://skillscan-rouge.vercel.app/api/scan \\\n  -H "Content-Type: application/json" \\\n  -d '{"url": "https://github.com/user/repo"}'`;
+                    const code = `curl -X POST https://skillscan.dev/api/scan \\\n  -H "Content-Type: application/json" \\\n  -d '{"url": "https://github.com/user/repo"}'`;
                     navigator.clipboard.writeText(code).then(() => {
                       setCopied(true);
                       setTimeout(() => setCopied(false), 2000);
@@ -450,12 +460,12 @@ export default function Home() {
               </div>
               <code className="text-sm">
 {`# Scan a GitHub repository
-curl -X POST https://skillscan-rouge.vercel.app/api/scan \\
+curl -X POST https://skillscan.dev/api/scan \\
   -H "Content-Type: application/json" \\
   -d '{"url": "https://github.com/user/repo"}'
 
 # Scan code directly  
-curl -X POST https://skillscan-rouge.vercel.app/api/scan \\
+curl -X POST https://skillscan.dev/api/scan \\
   -H "Content-Type: application/json" \\
   -d '{"code": "your code here"}'`}
               </code>
@@ -481,33 +491,68 @@ curl -X POST https://skillscan-rouge.vercel.app/api/scan \\
         </div>
       </section>
 
+      {/* CTA */}
+      <section className="py-32 px-6">
+        <div className="max-w-3xl mx-auto text-center">
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6 }}
+          >
+            <h2 className="text-4xl md:text-5xl font-light mb-6 text-white font-serif">
+              Need more power?
+            </h2>
+            <p className="text-muted text-lg mb-10 editorial-spacing max-w-xl mx-auto">
+              Private repo scanning, higher API limits, CI/CD integration, and team features.
+            </p>
+            <div className="flex items-center justify-center gap-4 flex-wrap">
+              <motion.button
+                onClick={scrollToScanner}
+                className="bg-accent hover:bg-accent/90 text-white px-8 py-4 rounded-lg text-sm font-medium transition-all"
+                whileHover={{ y: -2 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                Scan for Free
+              </motion.button>
+              <Link href="/pricing">
+                <motion.span
+                  className="inline-block bg-white/5 hover:bg-white/10 border border-white/10 text-white px-8 py-4 rounded-lg text-sm font-medium transition-all"
+                  whileHover={{ y: -2 }}
+                  whileTap={{ scale: 0.98 }}
+                >
+                  View Pricing →
+                </motion.span>
+              </Link>
+            </div>
+          </motion.div>
+        </div>
+      </section>
+
       {/* Footer */}
-      <footer className="border-t border-muted/20 py-12 px-6">
+      <footer className="border-t border-white/5 py-12 px-6">
         <div className="max-w-7xl mx-auto">
           <motion.div
             initial={{ opacity: 0 }}
             whileInView={{ opacity: 1 }}
             viewport={{ once: true }}
-            className="text-center"
+            className="flex flex-col md:flex-row items-center justify-between gap-4"
           >
-            <p className="text-muted text-sm mb-4">
-              Built with care by{' '}
-              <motion.a 
+            <p className="text-muted text-sm">
+              Built by{' '}
+              <a 
                 href="https://ninetynine.digital" 
                 className="text-accent hover:text-accent/80 transition-colors"
-                whileHover={{ scale: 1.05 }}
                 target="_blank"
                 rel="noopener noreferrer"
               >
                 ninetynine.digital
-              </motion.a>
+              </a>
             </p>
-            <div className="flex items-center justify-center space-x-6 text-xs text-muted">
-              <span>Secure by design</span>
-              <span>•</span>
-              <span>Privacy focused</span>
-              <span>•</span>
-              <span>Open source friendly</span>
+            <div className="flex items-center gap-6 text-xs text-muted">
+              <Link href="/pricing" className="hover:text-white transition-colors">Pricing</Link>
+              <a href="https://github.com/maxwellyoung/skillscan" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">GitHub</a>
+              <span>Open Source</span>
             </div>
           </motion.div>
         </div>

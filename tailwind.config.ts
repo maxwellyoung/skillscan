@@ -10,9 +10,9 @@ const config: Config = {
     extend: {
       colors: {
         accent: "hsl(355, 78%, 58%)", // Design system accent color
-        background: "hsl(220, 15%, 4%)", // Design system background
+        background: "#000000", // True black
         foreground: "hsl(0, 0%, 90%)", // Design system foreground
-        muted: "hsl(220, 15%, 25%)",
+        muted: "hsl(0, 0%, 25%)",
       },
       fontFamily: {
         mono: ['ui-monospace', 'SFMono-Regular', 'monospace'],

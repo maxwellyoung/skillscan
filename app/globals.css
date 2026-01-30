@@ -17,7 +17,7 @@ body {
   margin: 0;
   padding: 0;
   min-height: 100vh;
-  background: hsl(220, 15%, 4%);
+  background: #000000;
   color: hsl(0, 0%, 90%);
 }
 
@@ -34,8 +34,8 @@ h1, h2, h3, h4, h5, h6 {
 
 /* Code syntax highlighting */
 .syntax-highlight {
-  background: hsl(220, 15%, 8%);
-  border: 1px solid hsl(220, 15%, 15%);
+  background: hsl(0, 0%, 5%);
+  border: 1px solid hsl(0, 0%, 12%);
   border-radius: 8px;
   padding: 1rem;
   font-family: 'ui-monospace', 'SFMono-Regular', monospace;
@@ -45,7 +45,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .syntax-highlight .line-number {
-  color: hsl(220, 15%, 40%);
+  color: hsl(0, 0%, 35%);
   user-select: none;
   margin-right: 1rem;
   display: inline-block;

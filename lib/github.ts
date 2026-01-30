@@ -2,7 +2,7 @@ import { GitHubFile } from './types';
 
 export class GitHubFetcher {
   private static readonly MAX_FILES = 50;
-  private static readonly SUPPORTED_EXTENSIONS = ['.ts', '.js', '.mjs', '.sh'];
+  private static readonly SUPPORTED_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.sh', '.py', '.rb', '.go', '.rs', '.json'];
   private static readonly IMPORTANT_FILES = ['SKILL.md', 'package.json', 'README.md'];
 
   /**
@@ -110,11 +110,15 @@ export class GitHubFetcher {
         .replace('/blob/', '/');
     }
 
-    const response = await fetch(rawUrl, {
-      headers: {
-        'User-Agent': 'SkillScan-Security-Scanner/1.0'
-      }
-    });
+    const headers: Record<string, string> = {
+      'User-Agent': 'SkillScan-Security-Scanner/1.0'
+    };
+    const ghToken = process.env.GITHUB_TOKEN;
+    if (ghToken) {
+      headers['Authorization'] = `Bearer ${ghToken}`;
+    }
+
+    const response = await fetch(rawUrl, { headers });
 
     if (!response.ok) {
       throw new Error(`Failed to fetch file: ${response.statusText}`);
@@ -127,11 +131,15 @@ export class GitHubFetcher {
     const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${filename}`;
     
     try {
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'SkillScan-Security-Scanner/1.0'
-        }
-      });
+      const headers: Record<string, string> = {
+        'User-Agent': 'SkillScan-Security-Scanner/1.0'
+      };
+      const ghToken = process.env.GITHUB_TOKEN;
+      if (ghToken) {
+        headers['Authorization'] = `Bearer ${ghToken}`;
+      }
+
+      const response = await fetch(url, { headers });
 
       if (!response.ok) {
         return null;
@@ -153,12 +161,18 @@ export class GitHubFetcher {
       const url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${branch}`;
       
       try {
-        const response = await fetch(url, {
-          headers: {
-            'User-Agent': 'SkillScan-Security-Scanner/1.0',
-            'Accept': 'application/vnd.github.v3+json'
-          }
-        });
+        const headers: Record<string, string> = {
+          'User-Agent': 'SkillScan-Security-Scanner/1.0',
+          'Accept': 'application/vnd.github.v3+json'
+        };
+        
+        // Use GitHub token if available (raises rate limit from 60 to 5000 req/hr)
+        const ghToken = process.env.GITHUB_TOKEN;
+        if (ghToken) {
+          headers['Authorization'] = `Bearer ${ghToken}`;
+        }
+
+        const response = await fetch(url, { headers });
 
         if (!response.ok) {
           console.error(`GitHub API error: ${response.status} ${response.statusText}`);

@@ -55,11 +55,11 @@ export async function POST(request: NextRequest) {
     }
 
     if (body.code) {
-      // Handle direct code input
+      // Handle direct code input — use .ts extension so scanner treats it as executable
       files = [{
-        name: 'code.txt',
+        name: 'code.ts',
         content: body.code,
-        path: 'code.txt'
+        path: 'code.ts'
       }];
     }
 

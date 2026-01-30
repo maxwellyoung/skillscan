@@ -2,7 +2,7 @@ import { GitHubFile } from './types';
 
 export class GitHubFetcher {
   private static readonly MAX_FILES = 50;
-  private static readonly SUPPORTED_EXTENSIONS = ['.ts', '.js', '.mjs', '.sh'];
+  private static readonly SUPPORTED_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.sh', '.py', '.rb', '.go', '.rs', '.json'];
   private static readonly IMPORTANT_FILES = ['SKILL.md', 'package.json', 'README.md'];
 
   /**

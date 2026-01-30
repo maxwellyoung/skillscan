@@ -1,12 +1,7 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-:root {
-  --background: #0a0e17;
-  --foreground: #e0e6ed;
-}
 
 * {
   box-sizing: border-box;
@@ -17,27 +12,16 @@ html {
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
   font-family: 'Inter', system-ui, sans-serif;
   margin: 0;
   padding: 0;
   min-height: 100vh;
+  background: #09090b;
+  color: #fafafa;
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
-  }
-  
-  .gradient-text {
-    background: linear-gradient(135deg, #00FF88, #00ccff);
-    background-clip: text;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-  }
-  
-  .glow-green {
-    box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
   }
 }

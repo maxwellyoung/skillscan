@@ -9,18 +9,15 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: "#0a0e17",
-        foreground: "#e0e6ed",
-        accent: "#00FF88",
-        warning: "#FF6B6B",
-        muted: "#5a6577",
-        'dark-bg': '#0a0e17',
-        'dark-fg': '#e0e6ed',
-        'terminal-green': '#00FF88',
+        accent: "rgba(74, 222, 128, 0.8)", // #4ade80 at 80% opacity
       },
       fontFamily: {
-        mono: ['JetBrains Mono', 'Consolas', 'Monaco', 'monospace'],
+        mono: ['ui-monospace', 'SFMono-Regular', 'monospace'],
         sans: ['Inter', 'system-ui', 'sans-serif'],
+      },
+      letterSpacing: {
+        'wider': '0.05em',
+        'widest': '0.1em',
       },
     },
   },

@@ -1,803 +1,413 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Inter } from 'next/font/google';
+import { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence, useSpring } from 'framer-motion';
 import { ScanResult, Finding } from '@/lib/types';
 import Link from 'next/link';
-import { 
-  AlertTriangle, 
-  AlertCircle, 
-  Info, 
-  ChevronRight,
-  Shield,
-  Zap,
-  FileText,
-  Database,
-  Code,
-  Key,
-  Terminal,
-  Eye,
-  Lock,
-  Copy,
-  CheckCircle,
-  Loader2,
-  Github
-} from 'lucide-react';
 
-const inter = Inter({ subsets: ['latin'] });
+// Spring presets — physics-first
+const spring = {
+  responsive: { type: 'spring' as const, stiffness: 400, damping: 30 },
+  gentle: { type: 'spring' as const, stiffness: 100, damping: 20 },
+  silk: { type: 'spring' as const, stiffness: 200, damping: 25 },
+  bouncy: { type: 'spring' as const, stiffness: 300, damping: 15 },
+  heavy: { type: 'spring' as const, stiffness: 80, damping: 20 },
+};
 
-// Example scans for easy testing
-const EXAMPLE_SCANS = [
-  {
-    label: 'GitHub Repository',
-    url: 'https://github.com/microsoft/vscode',
-    type: 'Clean, well-maintained repo'
-  },
-  {
-    label: 'ClawdHub Skill',
-    url: 'https://clawdhub.com/skills/example-skill',
-    type: 'Sample skill analysis'
-  },
-  {
-    label: 'Suspicious Code',
-    code: `import subprocess
-import os
-
-# Dangerous: Execute arbitrary shell commands
-def execute_command(cmd):
-    subprocess.run(cmd, shell=True)
-
-# Hardcoded API key (security issue)
-API_KEY = "sk-1234567890abcdef"
-
-# File system access
-os.system("rm -rf /")`,
-    type: 'Contains security issues'
-  }
+const EXAMPLES = [
+  { label: 'GitHub repo', value: 'https://github.com/microsoft/vscode' },
+  { label: 'Paste code', value: `import subprocess\nos.system("rm -rf /")\nAPI_KEY = "sk-1234567890"` },
 ];
 
 export default function Home() {
   const [input, setInput] = useState('');
-  const [isScanning, setIsScanning] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const [result, setResult] = useState<ScanResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-detect input type based on content
-  const detectInputType = (value: string): 'url' | 'code' => {
-    return value.includes('http') || value.includes('github.com') || value.includes('clawdhub.com') ? 'url' : 'code';
-  };
+  const detect = (v: string): 'url' | 'code' =>
+    v.includes('http') || v.includes('github.com') || v.includes('clawdhub.com') ? 'url' : 'code';
 
-  const handleScan = async () => {
-    if (!input.trim()) return;
-
-    setIsScanning(true);
+  const scan = async () => {
+    if (!input.trim() || scanning) return;
+    setScanning(true);
     setError(null);
     setResult(null);
 
     try {
-      const inputType = detectInputType(input);
-      const response = await fetch('/api/scan', {
+      const type = detect(input);
+      const res = await fetch('/api/scan', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          [inputType]: input.trim()
-        })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [type]: input.trim() }),
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Scan failed');
-      }
-
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Scan failed');
       setResult(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
-      setIsScanning(false);
+      setScanning(false);
     }
-  };
-
-  const fillExample = (example: typeof EXAMPLE_SCANS[0]) => {
-    if (example.url) {
-      setInput(example.url);
-    } else if (example.code) {
-      setInput(example.code);
-    }
-  };
-
-  const scrollToScanner = () => {
-    document.getElementById('scanner')?.scrollIntoView({ behavior: 'smooth' });
   };
 
   return (
-    <div className={`min-h-screen bg-background text-foreground ${inter.className}`}>
-      {/* Nav */}
-      <nav className="border-b border-white/5 backdrop-blur-sm sticky top-0 z-50 bg-black/80">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <motion.div 
-              className="text-xl font-medium text-white font-serif"
-              whileHover={{ scale: 1.02 }}
-              transition={{ type: "spring", stiffness: 400, damping: 17 }}
-            >
-              SkillScan
-            </motion.div>
-            <div className="flex items-center gap-6">
-              <motion.button 
-                onClick={scrollToScanner}
-                className="text-muted hover:text-white transition-colors text-sm"
-                whileHover={{ y: -1 }}
-                whileTap={{ y: 0 }}
-              >
-                Scan
-              </motion.button>
-              <Link href="/pricing" className="text-muted hover:text-white transition-colors text-sm">
-                Pricing
-              </Link>
-              <a href="https://github.com/maxwellyoung/skillscan" target="_blank" rel="noopener noreferrer" className="text-muted hover:text-white transition-colors">
-                <Github className="w-4 h-4" />
-              </a>
-            </div>
-          </div>
+    <div className="min-h-screen bg-black text-white/90 flex flex-col">
+      {/* Nav — barely there */}
+      <nav className="px-6 py-5 flex items-center justify-between">
+        <span className="text-[15px] font-medium tracking-[-0.01em]">SkillScan</span>
+        <div className="flex items-center gap-5 text-[13px] text-white/40">
+          <Link href="/pricing" className="hover:text-white/70 transition-colors duration-200">
+            Pricing
+          </Link>
+          <a
+            href="https://github.com/maxwellyoung/skillscan"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-white/70 transition-colors duration-200"
+          >
+            Source
+          </a>
         </div>
       </nav>
 
-      {/* Hero */}
-      <section className="py-32 px-6">
-        <div className="max-w-4xl mx-auto text-center">
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
+      {/* Scanner — the whole point */}
+      <main className="flex-1 flex flex-col items-center justify-center px-6 pb-24">
+        <div className="w-full max-w-[560px]">
+          {/* Title — one line, then gone */}
+          <motion.h1
+            className="font-serif text-[32px] font-light tracking-[-0.02em] text-white mb-10 leading-[1.15]"
+            style={{ fontFamily: "'Newsreader', serif" }}
+            initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ 
-              duration: 0.8, 
-              type: "spring", 
-              stiffness: 100, 
-              damping: 20 
-            }}
+            transition={spring.gentle}
           >
-            <motion.p 
-              className="text-sm uppercase tracking-widest text-muted mb-8 font-medium"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.2 }}
-            >
-              Security for the AI toolchain
-            </motion.p>
-            <motion.h1 
-              className="text-6xl md:text-8xl font-light mb-8 text-white leading-tight font-serif editorial-spacing"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3, type: "spring", stiffness: 100 }}
-            >
-              Know what you&apos;re installing.
-            </motion.h1>
-            <motion.p 
-              className="text-xl text-muted mb-12 max-w-2xl mx-auto editorial-spacing"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.4 }}
-            >
-              Scan skills before they access your system.
-            </motion.p>
-            
-            <motion.button
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.5 }}
-              whileHover={{ y: -3, scale: 1.02 }}
-              whileTap={{ y: 0, scale: 0.98 }}
-              onClick={scrollToScanner}
-              className="bg-accent hover:bg-accent/90 text-white px-8 py-4 rounded-md text-sm font-medium transition-all shadow-lg hover:shadow-xl"
-            >
-              Scan a skill →
-            </motion.button>
-          </motion.div>
-        </div>
-      </section>
+            Know what you&apos;re installing.
+          </motion.h1>
 
-      {/* Scanner */}
-      <section id="scanner" className="py-32 px-6">
-        <div className="max-w-2xl mx-auto">
+          {/* Input */}
           <motion.div
-            initial={{ opacity: 0, y: 30 }}
+            initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.2 }}
-            className="space-y-6"
+            transition={{ ...spring.gentle, delay: 0.05 }}
           >
-            {/* Example buttons */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-8">
-              {EXAMPLE_SCANS.map((example, index) => (
-                <motion.button
-                  key={index}
-                  onClick={() => fillExample(example)}
-                  className="p-4 bg-muted/10 hover:bg-muted/20 border border-muted/20 rounded-lg text-left transition-all group"
-                  whileHover={{ y: -2, scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.1 + index * 0.1 }}
-                >
-                  <div className="text-sm font-medium text-white mb-1">{example.label}</div>
-                  <div className="text-xs text-muted">{example.type}</div>
-                </motion.button>
-              ))}
-            </div>
-
             <div className="relative">
+              <motion.div
+                className="absolute inset-0 rounded-lg pointer-events-none"
+                animate={{
+                  boxShadow: focused
+                    ? '0 0 0 1px rgba(255,255,255,0.15)'
+                    : '0 0 0 1px rgba(255,255,255,0.06)',
+                }}
+                transition={spring.silk}
+              />
               <textarea
+                ref={textareaRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="GitHub URL, ClawdHub skill URL, or paste code directly..."
-                className={`w-full bg-muted/10 border border-muted/30 rounded-lg px-4 py-6 text-white placeholder-muted focus:outline-none focus:border-accent/50 transition-all resize-none ${isScanning ? 'scanning-line' : ''}`}
-                rows={input.includes('\n') ? Math.min(input.split('\n').length + 2, 12) : 3}
-                onKeyDown={(e) => e.key === 'Enter' && e.metaKey && handleScan()}
+                onFocus={() => setFocused(true)}
+                onBlur={() => setFocused(false)}
+                placeholder="Paste a GitHub URL or code..."
+                className={`w-full bg-white/[0.03] rounded-lg px-4 py-4 text-[14px] text-white/90 placeholder:text-white/20 resize-none leading-relaxed transition-colors duration-200 ${scanning ? 'scanning' : ''}`}
+                rows={input.includes('\n') ? Math.min(input.split('\n').length + 1, 10) : 3}
+                onKeyDown={(e) => e.key === 'Enter' && e.metaKey && scan()}
               />
-              {detectInputType(input) === 'url' && (
-                <div className="absolute top-3 right-3 text-xs text-muted bg-muted/20 px-2 py-1 rounded">
-                  URL
-                </div>
-              )}
-              {detectInputType(input) === 'code' && input.trim() && (
-                <div className="absolute top-3 right-3 text-xs text-muted bg-muted/20 px-2 py-1 rounded">
-                  Code
-                </div>
+              {input.trim() && (
+                <motion.span
+                  className="absolute top-3 right-3 text-[11px] text-white/20 font-mono"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={spring.responsive}
+                >
+                  {detect(input)}
+                </motion.span>
               )}
             </div>
-            
-            <motion.button
-              onClick={handleScan}
-              disabled={isScanning || !input.trim()}
-              className="w-full bg-accent hover:bg-accent/90 text-white py-6 rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center space-x-2"
-              whileHover={!isScanning && !input.trim() ? {} : { y: -2 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              {isScanning ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Analyzing...</span>
-                </>
-              ) : (
-                <span>Scan Security</span>
-              )}
-            </motion.button>
 
-            <div className="text-xs text-muted text-center">
-              Tip: ⌘ + Enter to scan quickly
+            {/* Examples — quiet text links */}
+            <div className="flex items-center gap-3 mt-3 text-[12px] text-white/25">
+              <span>try:</span>
+              {EXAMPLES.map((ex, i) => (
+                <button
+                  key={i}
+                  onClick={() => {
+                    setInput(ex.value);
+                    textareaRef.current?.focus();
+                  }}
+                  className="hover:text-white/50 transition-colors duration-200 underline underline-offset-2 decoration-white/10 hover:decoration-white/30"
+                >
+                  {ex.label}
+                </button>
+              ))}
             </div>
           </motion.div>
 
-          {/* Results */}
+          {/* Scan button */}
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ ...spring.gentle, delay: 0.1 }}
+            className="mt-5"
+          >
+            <motion.button
+              onClick={scan}
+              disabled={scanning || !input.trim()}
+              className="w-full py-3.5 rounded-lg text-[14px] font-medium transition-colors duration-200 disabled:opacity-30 disabled:cursor-not-allowed bg-white/[0.08] hover:bg-white/[0.12] text-white/80 hover:text-white"
+              whileHover={!scanning && input.trim() ? { y: -1 } : {}}
+              whileTap={!scanning && input.trim() ? { scale: 0.985 } : {}}
+              transition={spring.responsive}
+            >
+              {scanning ? (
+                <span className="flex items-center justify-center gap-2">
+                  <motion.span
+                    className="block w-3 h-3 rounded-full border-2 border-white/30 border-t-white/80"
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }}
+                  />
+                  Scanning
+                </span>
+              ) : (
+                'Scan'
+              )}
+            </motion.button>
+            <p className="text-center text-[11px] text-white/15 mt-2.5">
+              {'\u2318'} + Enter
+            </p>
+          </motion.div>
+
+          {/* Error */}
           <AnimatePresence mode="wait">
             {error && (
               <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                className="mt-12 bg-red-950/20 border border-red-900/30 rounded-lg p-6"
+                initial={{ opacity: 0, y: 8, height: 0 }}
+                animate={{ opacity: 1, y: 0, height: 'auto' }}
+                exit={{ opacity: 0, y: -4, height: 0 }}
+                transition={spring.silk}
+                className="mt-8 px-4 py-3 rounded-lg border border-red-500/20 bg-red-500/[0.05]"
               >
-                <div className="flex items-center space-x-2">
-                  <AlertTriangle className="w-5 h-5 text-red-400" />
-                  <h3 className="font-medium text-red-400">Scan failed</h3>
-                </div>
-                <p className="text-red-300 text-sm mt-2">{error}</p>
+                <p className="text-[13px] text-red-400/80">{error}</p>
               </motion.div>
             )}
+          </AnimatePresence>
 
-            {result && <ScanResults result={result} />}
+          {/* Results */}
+          <AnimatePresence mode="wait">
+            {result && <Results result={result} />}
           </AnimatePresence>
         </div>
-      </section>
+      </main>
 
-      {/* How it works */}
-      <section className="py-32 px-6 bg-white/[0.02]">
-        <div className="max-w-4xl mx-auto">
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.6 }}
-            className="text-center mb-16"
-          >
-            <h2 className="text-4xl font-light mb-4 text-white font-serif">How it works</h2>
-            <p className="text-muted editorial-spacing">Simple, fast, and thorough security analysis</p>
-          </motion.div>
-          
-          <div className="grid md:grid-cols-3 gap-12 text-left">
-            {[
-              {
-                number: '1',
-                title: 'Paste a GitHub URL or skill code',
-                description: 'We automatically detect the format and fetch the code for analysis.',
-                icon: FileText
-              },
-              {
-                number: '2', 
-                title: 'We analyze 13 security vectors',
-                description: 'Static analysis identifies common attack patterns and vulnerabilities.',
-                icon: Shield
-              },
-              {
-                number: '3',
-                title: 'Get a detailed report in seconds',
-                description: 'Review findings with clear severity ratings and remediation advice.',
-                icon: CheckCircle
-              }
-            ].map((item, index) => (
-              <motion.div
-                key={index}
-                initial={{ opacity: 0, y: 30 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.6, delay: index * 0.2 }}
-                className="text-center group"
-              >
-                <div className="w-16 h-16 bg-accent/10 rounded-full flex items-center justify-center mx-auto mb-6 group-hover:bg-accent/20 transition-colors">
-                  <item.icon className="w-8 h-8 text-accent" />
-                </div>
-                <h3 className="text-xl font-medium mb-3 text-white font-serif">{item.title}</h3>
-                <p className="text-muted leading-relaxed editorial-spacing">{item.description}</p>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* What we check */}
-      <section className="py-32 px-6">
-        <div className="max-w-6xl mx-auto">
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.6 }}
-            className="text-center mb-16"
-          >
-            <h2 className="text-4xl font-light mb-4 text-white font-serif">What we check</h2>
-            <p className="text-muted editorial-spacing">Comprehensive security analysis across 12+ vectors</p>
-          </motion.div>
-          
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {[
-              { title: 'API token theft', description: 'Unauthorized access to API credentials', icon: Key },
-              { title: 'Shell command execution', description: 'Dangerous system command injection', icon: Terminal },
-              { title: 'File system abuse', description: 'Unauthorized file access or modification', icon: FileText },
-              { title: 'Data exfiltration', description: 'Suspicious network requests and webhooks', icon: Database },
-              { title: 'Code injection', description: 'Dynamic code execution vulnerabilities', icon: Code },
-              { title: 'Hardcoded secrets', description: 'Exposed credentials in source code', icon: Lock },
-              { title: 'Prompt injection', description: 'Malicious prompt manipulation attempts', icon: Zap },
-              { title: 'Obfuscated code', description: 'Deliberately hidden or encoded logic', icon: Eye },
-              { title: 'Excessive permissions', description: 'Unnecessary system access requests', icon: Shield },
-            ].map((check, index) => (
-              <motion.div
-                key={index}
-                initial={{ opacity: 0, y: 30 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.6, delay: index * 0.1 }}
-                className="bg-muted/10 border border-muted/20 rounded-lg p-6 hover:border-muted/40 transition-colors group"
-                whileHover={{ y: -2 }}
-              >
-                <div className="flex items-start space-x-4">
-                  <div className="w-10 h-10 bg-accent/10 rounded-lg flex items-center justify-center group-hover:bg-accent/20 transition-colors">
-                    <check.icon className="w-5 h-5 text-accent" />
-                  </div>
-                  <div>
-                    <h3 className="font-medium text-white mb-2 group-hover:text-accent transition-colors font-serif">
-                      {check.title}
-                    </h3>
-                    <p className="text-muted text-sm leading-relaxed editorial-spacing">{check.description}</p>
-                  </div>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* CLI Section */}
-      <section className="py-32 px-6 bg-white/[0.02]">
-        <div className="max-w-4xl mx-auto">
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.6 }}
-            className="text-center mb-16"
-          >
-            <h2 className="text-4xl font-light mb-4 text-white font-serif">Command Line Interface</h2>
-            <p className="text-muted editorial-spacing">Integrate security scanning into your development workflow</p>
-          </motion.div>
-
-          <div className="space-y-8">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              className="syntax-highlight"
-            >
-              <div className="flex justify-between items-center mb-4">
-                <span className="text-accent text-sm font-medium">Scan via curl</span>
-                <motion.button
-                  className="text-muted hover:text-white transition-colors"
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => {
-                    const code = `curl -X POST https://skillscan.dev/api/scan \\\n  -H "Content-Type: application/json" \\\n  -d '{"url": "https://github.com/user/repo"}'`;
-                    navigator.clipboard.writeText(code).then(() => {
-                      setCopied(true);
-                      setTimeout(() => setCopied(false), 2000);
-                    });
-                  }}
-                >
-                  <AnimatePresence mode="wait">
-                    {copied ? (
-                      <motion.div
-                        key="check"
-                        initial={{ scale: 0, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        exit={{ scale: 0, opacity: 0 }}
-                        transition={{ type: "spring", stiffness: 500, damping: 25 }}
-                      >
-                        <CheckCircle className="w-4 h-4 text-green-400" />
-                      </motion.div>
-                    ) : (
-                      <motion.div
-                        key="copy"
-                        initial={{ scale: 0, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        exit={{ scale: 0, opacity: 0 }}
-                      >
-                        <Copy className="w-4 h-4" />
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </motion.button>
-              </div>
-              <code className="text-sm">
-{`# Scan a GitHub repository
-curl -X POST https://skillscan.dev/api/scan \\
-  -H "Content-Type: application/json" \\
-  -d '{"url": "https://github.com/user/repo"}'
-
-# Scan code directly  
-curl -X POST https://skillscan.dev/api/scan \\
-  -H "Content-Type: application/json" \\
-  -d '{"code": "your code here"}'`}
-              </code>
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ delay: 0.1 }}
-              className="grid md:grid-cols-2 gap-6 text-sm"
-            >
-              <div>
-                <h4 className="font-medium text-white mb-2 font-serif">Response Format</h4>
-                <p className="text-muted editorial-spacing">JSON response with security score, grade, and detailed findings</p>
-              </div>
-              <div>
-                <h4 className="font-medium text-white mb-2 font-serif">Integration</h4>
-                <p className="text-muted editorial-spacing">Perfect for CI/CD pipelines, pre-commit hooks, and automated workflows</p>
-              </div>
-            </motion.div>
-          </div>
-        </div>
-      </section>
-
-      {/* CTA */}
-      <section className="py-32 px-6">
-        <div className="max-w-3xl mx-auto text-center">
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.6 }}
-          >
-            <h2 className="text-4xl md:text-5xl font-light mb-6 text-white font-serif">
-              Need more power?
-            </h2>
-            <p className="text-muted text-lg mb-10 editorial-spacing max-w-xl mx-auto">
-              Private repo scanning, higher API limits, CI/CD integration, and team features.
-            </p>
-            <div className="flex items-center justify-center gap-4 flex-wrap">
-              <motion.button
-                onClick={scrollToScanner}
-                className="bg-accent hover:bg-accent/90 text-white px-8 py-4 rounded-lg text-sm font-medium transition-all"
-                whileHover={{ y: -2 }}
-                whileTap={{ scale: 0.98 }}
-              >
-                Scan for Free
-              </motion.button>
-              <Link href="/pricing">
-                <motion.span
-                  className="inline-block bg-white/5 hover:bg-white/10 border border-white/10 text-white px-8 py-4 rounded-lg text-sm font-medium transition-all"
-                  whileHover={{ y: -2 }}
-                  whileTap={{ scale: 0.98 }}
-                >
-                  View Pricing →
-                </motion.span>
-              </Link>
-            </div>
-          </motion.div>
-        </div>
-      </section>
-
-      {/* Footer */}
-      <footer className="border-t border-white/5 py-12 px-6">
-        <div className="max-w-7xl mx-auto">
-          <motion.div
-            initial={{ opacity: 0 }}
-            whileInView={{ opacity: 1 }}
-            viewport={{ once: true }}
-            className="flex flex-col md:flex-row items-center justify-between gap-4"
-          >
-            <p className="text-muted text-sm">
-              Built by{' '}
-              <a 
-                href="https://ninetynine.digital" 
-                className="text-accent hover:text-accent/80 transition-colors"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                ninetynine.digital
-              </a>
-            </p>
-            <div className="flex items-center gap-6 text-xs text-muted">
-              <Link href="/pricing" className="hover:text-white transition-colors">Pricing</Link>
-              <a href="https://github.com/maxwellyoung/skillscan" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">GitHub</a>
-              <span>Open Source</span>
-            </div>
-          </motion.div>
-        </div>
+      {/* Footer — whisper */}
+      <footer className="px-6 py-5 text-[12px] text-white/20">
+        <a
+          href="https://ninetynine.digital"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:text-white/40 transition-colors duration-200"
+        >
+          ninetynine.digital
+        </a>
       </footer>
     </div>
   );
 }
 
-function ScanResults({ result }: { result: ScanResult }) {
-  const [animatedScore, setAnimatedScore] = useState(0);
-  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
+// — Results —
 
-  // Animated score counter
+function ScoreDisplay({ score, grade }: { score: number; grade: string }) {
+  const springVal = useSpring(0, { stiffness: 60, damping: 20 });
+  const [shown, setShown] = useState(0);
+
   useEffect(() => {
-    const duration = 1500;
-    const steps = 60;
-    const increment = result.score / steps;
-    let current = 0;
+    springVal.set(score);
+    return springVal.on('change', (v) => setShown(Math.round(v)));
+  }, [score, springVal]);
 
-    const timer = setInterval(() => {
-      current += increment;
-      if (current >= result.score) {
-        setAnimatedScore(result.score);
-        clearInterval(timer);
-      } else {
-        setAnimatedScore(Math.floor(current));
-      }
-    }, duration / steps);
+  const color =
+    score >= 80 ? 'text-emerald-400' : score >= 60 ? 'text-amber-400' : 'text-red-400';
 
-    return () => clearInterval(timer);
-  }, [result.score]);
+  return (
+    <motion.div
+      className="relative flex items-baseline gap-4 py-8"
+      initial={{ opacity: 0, scale: 0.96 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={spring.heavy}
+    >
+      {/* Muriel Cooper glow layer */}
+      <div className={`score-glow ${color}`}>
+        <span className="text-[96px] font-extralight tabular-nums">{shown}</span>
+      </div>
 
-  // Group findings by category
-  const findingsByCategory = result.findings.reduce((acc, finding) => {
-    const category = finding.category || 'General';
-    if (!acc[category]) acc[category] = [];
-    acc[category].push(finding);
+      <span className={`text-[96px] font-extralight tabular-nums relative z-10 ${color}`}>
+        {shown}
+      </span>
+      <motion.span
+        className={`text-[40px] font-light font-serif relative z-10 ${color}`}
+        style={{ fontFamily: "'Newsreader', serif" }}
+        initial={{ opacity: 0, x: -8 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ ...spring.silk, delay: 0.3 }}
+      >
+        {grade}
+      </motion.span>
+    </motion.div>
+  );
+}
+
+function Results({ result }: { result: ScanResult }) {
+  const findingsByCategory = result.findings.reduce((acc, f) => {
+    const cat = f.category || 'General';
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(f);
     return acc;
   }, {} as Record<string, Finding[]>);
 
-  const toggleCategory = (category: string) => {
-    const newCollapsed = new Set(collapsedCategories);
-    if (newCollapsed.has(category)) {
-      newCollapsed.delete(category);
-    } else {
-      newCollapsed.add(category);
-    }
-    setCollapsedCategories(newCollapsed);
+  const [expanded, setExpanded] = useState<Set<string>>(
+    new Set(Object.keys(findingsByCategory))
+  );
+
+  const toggle = (cat: string) => {
+    const next = new Set(expanded);
+    if (next.has(cat)) { next.delete(cat); } else { next.add(cat); }
+    setExpanded(next);
   };
 
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return 'text-green-400';
-    if (score >= 60) return 'text-yellow-400';
-    return 'text-red-400';
-  };
-
-  const getGradeColor = (grade: string) => {
-    if (grade === 'A' || grade === 'B') return 'text-green-400';
-    if (grade === 'C') return 'text-yellow-400';
-    return 'text-red-400';
-  };
-
-  const getSeverityInfo = (severity: string) => {
-    switch (severity) {
-      case 'critical':
-        return { color: 'text-red-400', bgColor: 'bg-red-400/20', icon: AlertTriangle };
-      case 'high':
-        return { color: 'text-orange-400', bgColor: 'bg-orange-400/20', icon: AlertCircle };
-      case 'medium':
-        return { color: 'text-yellow-400', bgColor: 'bg-yellow-400/20', icon: AlertCircle };
-      case 'low':
-        return { color: 'text-blue-400', bgColor: 'bg-blue-400/20', icon: Info };
-      default:
-        return { color: 'text-gray-400', bgColor: 'bg-gray-400/20', icon: Info };
-    }
-  };
-
-  const formatCode = (snippet: string) => {
-    return snippet.split('\n').map((line, index) => (
-      <div key={index} className="flex">
-        <span className="line-number">{index + 1}</span>
-        <span>{line}</span>
-      </div>
-    ));
+  const severityDot = (s: string) => {
+    const colors: Record<string, string> = {
+      critical: 'bg-red-400',
+      high: 'bg-orange-400',
+      medium: 'bg-amber-400',
+      low: 'bg-blue-400',
+    };
+    return colors[s] || 'bg-white/30';
   };
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 30 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.6 }}
-      className="mt-12 space-y-8"
+      className="mt-10 space-y-1"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ ...spring.gentle, delay: 0.1 }}
     >
-      {/* Dramatic Score Display */}
-      <motion.div
-        className="bg-muted/10 border border-muted/20 rounded-lg p-8 text-center"
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        transition={{ duration: 0.8, type: "spring", stiffness: 100 }}
+      <ScoreDisplay score={result.score} grade={result.grade} />
+
+      {/* Summary */}
+      <motion.p
+        className="text-[14px] text-white/50 leading-relaxed pb-6"
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ ...spring.gentle, delay: 0.2 }}
       >
-        <div className="flex items-center justify-center space-x-8 mb-6">
-          <motion.div 
-            className={`text-8xl font-light ${getScoreColor(result.score)}`}
-            initial={{ scale: 0.5 }}
-            animate={{ scale: 1 }}
-            transition={{ duration: 1, type: "spring", stiffness: 100 }}
-          >
-            {animatedScore}
-          </motion.div>
-          <motion.div 
-            className={`text-5xl font-medium ${getGradeColor(result.grade)} font-serif`}
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.8, delay: 0.5 }}
-          >
-            {result.grade}
-          </motion.div>
-        </div>
-        
-        <motion.p 
-          className="text-muted mb-8 text-lg editorial-spacing"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 1 }}
-        >
-          {result.summary}
-        </motion.p>
-        
-        <motion.div 
-          className="flex justify-center space-x-12 text-sm"
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 1.2 }}
-        >
-          <div>
-            <div className="text-white font-medium text-2xl">{result.scannedFiles}</div>
-            <div className="text-muted">Files</div>
-          </div>
-          <div>
-            <div className="text-white font-medium text-2xl">{result.linesAnalyzed.toLocaleString()}</div>
-            <div className="text-muted">Lines</div>
-          </div>
-        </motion.div>
+        {result.summary}
+      </motion.p>
+
+      {/* Stats */}
+      <motion.div
+        className="flex gap-8 text-[12px] text-white/30 pb-8 border-b border-white/5"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.3 }}
+      >
+        <span>{result.scannedFiles} files</span>
+        <span>{result.linesAnalyzed.toLocaleString()} lines</span>
+        <span>{result.findings.length} findings</span>
       </motion.div>
 
-      {/* Collapsible Findings by Category */}
-      {Object.keys(findingsByCategory).length > 0 && (
-        <div className="space-y-4">
-          <motion.h3 
-            className="text-xl font-medium text-white font-serif"
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
+      {/* Findings */}
+      {Object.entries(findingsByCategory).map(([category, findings], i) => (
+        <motion.div
+          key={category}
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ ...spring.silk, delay: 0.3 + i * 0.05 }}
+        >
+          <button
+            onClick={() => toggle(category)}
+            className="w-full flex items-center justify-between py-3.5 text-left group"
           >
-            Security Findings ({result.findings.length})
-          </motion.h3>
-          
-          {Object.entries(findingsByCategory).map(([category, findings], categoryIndex) => (
-            <motion.div
-              key={category}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: categoryIndex * 0.1 }}
-              className="bg-muted/10 border border-muted/20 rounded-lg overflow-hidden"
+            <div className="flex items-center gap-3">
+              <span className="text-[14px] text-white/70 group-hover:text-white/90 transition-colors duration-200">
+                {category}
+              </span>
+              <span className="text-[11px] text-white/20 tabular-nums">
+                {findings.length}
+              </span>
+            </div>
+            <motion.span
+              className="text-[11px] text-white/20"
+              animate={{ rotate: expanded.has(category) ? 90 : 0 }}
+              transition={spring.responsive}
             >
-              <motion.button
-                onClick={() => toggleCategory(category)}
-                className="w-full p-4 flex items-center justify-between hover:bg-muted/10 transition-colors"
-                whileHover={{ scale: 1.01 }}
-                whileTap={{ scale: 0.99 }}
+              &rsaquo;
+            </motion.span>
+          </button>
+
+          <AnimatePresence>
+            {expanded.has(category) && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden"
               >
-                <div className="flex items-center space-x-3">
-                  <span className="text-white font-medium font-serif">{category}</span>
-                  <span className="text-xs text-muted bg-muted/20 px-2 py-1 rounded-full">
-                    {findings.length} finding{findings.length !== 1 ? 's' : ''}
-                  </span>
-                </div>
-                <motion.div
-                  animate={{ rotate: collapsedCategories.has(category) ? 0 : 90 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  <ChevronRight className="w-5 h-5 text-muted" />
-                </motion.div>
-              </motion.button>
-              
-              <AnimatePresence>
-                {!collapsedCategories.has(category) && (
+                {findings.map((finding, j) => (
                   <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.3 }}
-                    className="border-t border-muted/20"
+                    key={j}
+                    className="pl-4 pb-5 mb-1 border-l border-white/5"
+                    initial={{ opacity: 0, x: -4 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ ...spring.silk, delay: j * 0.03 }}
                   >
-                    {findings.map((finding, findingIndex) => {
-                      const severityInfo = getSeverityInfo(finding.severity);
-                      const SeverityIcon = severityInfo.icon;
-                      
-                      return (
-                        <motion.div
-                          key={findingIndex}
-                          initial={{ opacity: 0, x: -20 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ duration: 0.3, delay: findingIndex * 0.1 }}
-                          className="p-6 border-b border-muted/10 last:border-b-0"
-                        >
-                          <div className="flex items-start space-x-4">
-                            <div className={`${severityInfo.bgColor} p-2 rounded-lg`}>
-                              <SeverityIcon className={`w-4 h-4 ${severityInfo.color}`} />
+                    <div className="flex items-start gap-2.5">
+                      <span
+                        className={`mt-[7px] w-1.5 h-1.5 rounded-full shrink-0 ${severityDot(finding.severity)}`}
+                      />
+                      <div className="space-y-2 min-w-0">
+                        <div>
+                          <p className="text-[13px] text-white/80 leading-snug">
+                            {finding.title}
+                          </p>
+                          <p className="text-[12px] text-white/35 leading-relaxed mt-0.5">
+                            {finding.description}
+                          </p>
+                        </div>
+
+                        {finding.snippet && (
+                          <div className="code-block">
+                            <div className="text-[11px] text-white/20 mb-1.5 font-sans">
+                              {finding.file}
+                              {finding.line && `:${finding.line}`}
                             </div>
-                            <div className="flex-1 space-y-3">
-                              <div>
-                                <h4 className="font-medium text-white mb-1 font-serif">{finding.title}</h4>
-                                <p className="text-muted text-sm editorial-spacing">{finding.description}</p>
-                              </div>
-                              
-                              {finding.snippet && (
-                                <div className="syntax-highlight">
-                                  <div className="text-xs text-muted mb-2">
-                                    <FileText className="w-3 h-3 inline mr-1" />
-                                    {finding.file}{finding.line && `:${finding.line}`}
-                                  </div>
-                                  <code className="text-sm">
-                                    {formatCode(finding.snippet)}
-                                  </code>
+                            <code className="text-[12px] text-white/60">
+                              {finding.snippet.split('\n').map((line, k) => (
+                                <div key={k}>
+                                  <span className="ln">{k + 1}</span>
+                                  {line}
                                 </div>
-                              )}
-                              
-                              {finding.remediation && (
-                                <div className="bg-accent/10 border border-accent/20 rounded-lg p-3">
-                                  <div className="text-accent text-sm font-medium mb-1">Recommended Fix</div>
-                                  <p className="text-white text-sm editorial-spacing">{finding.remediation}</p>
-                                </div>
-                              )}
-                            </div>
+                              ))}
+                            </code>
                           </div>
-                        </motion.div>
-                      );
-                    })}
+                        )}
+
+                        {finding.remediation && (
+                          <p className="text-[12px] text-white/30 leading-relaxed pl-3 border-l border-white/8">
+                            {finding.remediation}
+                          </p>
+                        )}
+                      </div>
+                    </div>
                   </motion.div>
-                )}
-              </AnimatePresence>
-            </motion.div>
-          ))}
-        </div>
-      )}
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <div className="border-b border-white/[0.03]" />
+        </motion.div>
+      ))}
     </motion.div>
   );
 }

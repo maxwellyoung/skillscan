@@ -6,7 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "fallow": "npx --yes fallow",
+    "fallow:dead-code": "npx --yes fallow dead-code",
+    "fallow:dupes": "npx --yes fallow dupes",
+    "fallow:health": "npx --yes fallow health",
+    "fallow:audit": "npx --yes fallow audit",
+    "fallow:fix:dry-run": "npx --yes fallow fix --dry-run"
   },
   "dependencies": {
     "framer-motion": "^12.29.2",

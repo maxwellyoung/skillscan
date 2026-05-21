@@ -1,7 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GitHubFetcher } from '@/lib/github';
+import { RegistryFetcher } from '@/lib/registry';
 import { SecurityScanner } from '@/lib/scanner';
 import { ScanRequest, GitHubFile } from '@/lib/types';
+
+function inferPastedFileName(code: string): string {
+  const trimmed = code.trim();
+
+  if (/^---[\s\S]{0,400}(?:allowed-tools|tools|permissions)\s*:/i.test(trimmed)) {
+    return 'SKILL.md';
+  }
+
+  try {
+    const json = JSON.parse(trimmed);
+    if (json?.engines?.vscode || json?.activationEvents || json?.contributes) {
+      return 'package.json';
+    }
+    if (json?.scripts || json?.dependencies || json?.devDependencies || json?.name || json?.version) {
+      return 'package.json';
+    }
+  } catch {
+    // Not JSON; treat as executable source below.
+  }
+
+  if (/from ['"`]vscode['"`]|require\(['"`]vscode['"`]\)|vscode\./i.test(trimmed)) {
+    return 'extension.ts';
+  }
+
+  return 'code.ts';
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -56,20 +83,40 @@ export async function POST(request: NextRequest) {
             );
           }
         }
+      } else if (RegistryFetcher.isNpmUrl(url)) {
+        try {
+          files = await RegistryFetcher.fetchNpm(url);
+        } catch (error) {
+          console.error('npm fetch error:', error);
+          return NextResponse.json(
+            { error: 'Failed to fetch npm package metadata. Check the package URL or version.' },
+            { status: 400 }
+          );
+        }
+      } else if (RegistryFetcher.isOpenVsxUrl(url)) {
+        try {
+          files = await RegistryFetcher.fetchOpenVsx(url);
+        } catch (error) {
+          console.error('OpenVSX fetch error:', error);
+          return NextResponse.json(
+            { error: 'Failed to fetch OpenVSX extension metadata. Check the extension URL.' },
+            { status: 400 }
+          );
+        }
       } else {
         return NextResponse.json(
-          { error: 'Only GitHub and ClawdHub URLs are supported' },
+          { error: 'GitHub, ClawdHub, npm, and OpenVSX URLs are supported' },
           { status: 400 }
         );
       }
     }
 
     if (code) {
-      // Handle direct code input — use .ts extension so scanner treats it as executable
+      const name = inferPastedFileName(code);
       files = [{
-        name: 'code.ts',
+        name,
         content: code,
-        path: 'code.ts'
+        path: name
       }];
     }
 
@@ -100,7 +147,7 @@ export async function GET() {
     { 
       message: 'SkillScan Security Scanner API',
       endpoints: {
-        'POST /api/scan': 'Scan code, GitHub repositories, or supported skill-directory URLs for security issues'
+        'POST /api/scan': 'Scan code, GitHub repositories, npm packages, OpenVSX extensions, or supported skill-directory URLs for security issues'
       }
     }
   );

@@ -9,16 +9,16 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://skillscan.dev"),
-  title: "SkillScan – Security Scanner for AI Skills & MCP Servers",
+  title: "SkillScan – Security Scanner for AI Skills, npm & VS Code",
   description:
-    "Free, instant security scanning for Claude Code skills, MCP servers, and GitHub repos. 16 deterministic checks. Know what you're installing before it accesses your system.",
+    "Free, instant security scanning for AI skills, MCP servers, npm packages, VS Code extensions, and GitHub repos. 20 deterministic checks. Know what you're installing before it accesses your system.",
   keywords:
-    "claude code, mcp, security scanner, static analysis, skill scanner, ai security, vulnerability scanner, github security, code analysis, supply chain security",
+    "claude code, mcp, npm security, vscode extension security, security scanner, static analysis, skill scanner, ai security, vulnerability scanner, github security, code analysis, supply chain security",
   authors: [{ name: "ninetynine.digital", url: "https://ninetynine.digital" }],
   openGraph: {
-    title: "SkillScan – Security Scanner for AI Skills",
+    title: "SkillScan – Security Scanner for AI Skills, npm & VS Code",
     description:
-      "Free, instant security analysis for Claude Code skills and MCP servers. 16 deterministic checks. Know what you're installing.",
+      "Free, instant security analysis for AI skills, npm packages, VS Code extensions, and MCP servers. 20 deterministic checks. Know what you're installing.",
     url: "https://skillscan.dev",
     siteName: "SkillScan",
     type: "website",
@@ -27,15 +27,15 @@ export const metadata: Metadata = {
         url: "/og-image",
         width: 1200,
         height: 630,
-        alt: "SkillScan – Security Scanner for AI Skills",
+        alt: "SkillScan – Security Scanner for AI Skills, npm & VS Code",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "SkillScan – Security Scanner for AI Skills",
+    title: "SkillScan – Security Scanner for AI Skills, npm & VS Code",
     description:
-      "Scan skills for security vulnerabilities before they access your system. Free & instant.",
+      "Scan AI skills, npm packages, and VS Code extensions before they access your system. Free & instant.",
     images: ["/og-image"],
   },
   robots: {

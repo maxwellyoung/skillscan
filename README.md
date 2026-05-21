@@ -1,8 +1,8 @@
 # SkillScan
 
-Static security scanning for Claude Code skills and MCP servers.
+Static security scanning for AI skills, MCP servers, npm packages, and VS Code extensions.
 
-SkillScan checks local skill instructions, GitHub-hosted code, and MCP server repositories for risky patterns before you install or run them. It is intentionally fast and boring: static analysis, clear findings, and remediation notes.
+SkillScan checks local skill instructions, GitHub-hosted code, npm package metadata, OpenVSX extension metadata, and MCP server repositories for risky patterns before you install or run them. It is intentionally fast and boring: static analysis, clear findings, and remediation notes.
 
 ## The ClawdHub Supply Chain Crisis
 
@@ -17,7 +17,7 @@ His advice? "Read every file or feed files to AI to check safety." **We automate
 ## What it demonstrates
 
 - Static analysis for a fast-moving AI tooling ecosystem.
-- GitHub URL, file, and direct-code scanning.
+- GitHub URL, npm package URL, OpenVSX extension URL, file, and direct-code scanning.
 - Risk scoring with severity, category, location, snippet, and remediation.
 - A focused security UI that avoids hiding findings behind generic AI summaries.
 - A public example of building small developer tools with practical failure modes.
@@ -26,8 +26,10 @@ His advice? "Read every file or feed files to AI to check safety." **We automate
 
 - ClawdHub and Claude Code skill attack detection.
 - MCP server and GitHub repository scanning.
+- npm package metadata and lifecycle-script scanning.
+- VS Code/OpenVSX extension manifest and source-behavior scanning.
 - 0-100 security score with A-F grades.
-- Pattern checks for shell execution, network access, file-system access, prompt injection, credential patterns, and data exfiltration.
+- Pattern checks for shell execution, network access, file-system access, prompt injection, credential patterns, data exfiltration, package install hooks, and extension activation behavior.
 - No AI inference required for the core scan.
 - Explicit install verdicts: pass, manual review, or block install.
 - Committed malicious fixture corpus for token exfiltration, malicious install hooks, hostile skill instructions, and persistence attempts.
@@ -53,6 +55,10 @@ Based on real ClawdHub compromises and supply chain attacks:
 14. **Persistence & System Modification** - Startup jobs, SSH access files, curl-pipe-shell, destructive deletes, broad chmod/chown
 15. **Malicious Skill Instructions** - Instruction files combining broad tool access, secrets, outbound transmission, or override language
 16. **Dangerous Lifecycle Scripts** - Critical scoring for install hooks that run network, shell, secret, or filesystem-modifying behavior
+17. **npm Package Provenance** - Missing repository/homepage metadata and larger CLI install surfaces
+18. **Dependency Confusion Signals** - Suspicious dependency names and package-name lookalikes
+19. **VS Code Extension Activation** - Broad activation events such as `*`, startup, workspace, and language-wide activation
+20. **VS Code Extension Runtime Behavior** - Terminal execution, workspace file access, clipboard access, and secret exfiltration flows
 
 ## Evaluation Harness
 
@@ -64,6 +70,8 @@ Committed malicious fixtures live in `test/fixtures/malicious` and cover:
 - `postinstall` scripts that fetch and execute remote code.
 - `SKILL.md` instructions that request broad tools, secrets, and webhook transmission.
 - Persistence attempts through launch agents, SSH authorized keys, and broad file permission changes.
+- npm packages that exfiltrate environment variables during install.
+- VS Code extensions with broad activation, terminal execution, clipboard access, and outbound secret transmission.
 
 Those fixtures must all produce `riskLevel: "block"`:
 
@@ -102,13 +110,24 @@ https://claudhub.ai/skills/username/skillname
 https://github.com/username/repo
 ```
 
+### Scan npm Package
+```
+https://www.npmjs.com/package/package-name
+pkg:npm/package-name@1.2.3
+```
+
+### Scan OpenVSX Extension
+```
+https://open-vsx.org/extension/publisher/extension-name
+```
+
 ### Scan Single File
 ```
 https://github.com/username/repo/blob/main/file.ts
 ```
 
 ### Scan Code Directly
-Paste your skill code directly into the scanner.
+Paste skill instructions, package manifests, extension manifests, or source code directly into the scanner.
 
 ## Why SkillScan Exists
 
@@ -125,7 +144,7 @@ ClawdHub has **zero vetting**. Any skill can be published. The Nick Saraev video
 
 ### POST /api/scan
 
-Scan code or GitHub repository for security issues.
+Scan code, GitHub repositories, npm packages, OpenVSX extensions, or supported skill-directory URLs for security issues.
 
 **Request Body:**
 ```json

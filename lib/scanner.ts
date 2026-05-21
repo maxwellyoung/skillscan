@@ -2,7 +2,7 @@ import { Finding, ScanResult, GitHubFile } from './types';
 
 type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 
-const CHECKS_RUN = 16;
+const CHECKS_RUN = 20;
 const severityRank: Record<Severity, number> = {
   critical: 0,
   high: 1,
@@ -197,6 +197,9 @@ export class SecurityScanner {
     if (file.name === 'package.json') {
       this.checkPackageJson(content, file);
     }
+
+    // 14. VS Code extension source behavior
+    this.checkVsCodeExtensionBehavior(content, file, lines);
   }
 
   private checkExecCalls(content: string, file: GitHubFile, lines: string[]): void {
@@ -769,6 +772,9 @@ export class SecurityScanner {
         }
       });
 
+      this.checkNpmPackageMetadata(pkg, file);
+      this.checkVsCodeManifest(pkg, file);
+
     } catch {
       this.addFinding({
         severity: 'low',
@@ -778,6 +784,144 @@ export class SecurityScanner {
         file: file.name,
         remediation: 'Fix JSON syntax errors in package.json.'
       });
+    }
+  }
+
+  private checkNpmPackageMetadata(pkg: Record<string, unknown>, file: GitHubFile): void {
+    const name = String(pkg.name || '');
+    const repository = pkg.repository;
+    const scripts = pkg.scripts && typeof pkg.scripts === 'object' ? pkg.scripts as Record<string, unknown> : {};
+    const bin = pkg.bin;
+    const dependencies = {
+      ...(pkg.dependencies && typeof pkg.dependencies === 'object' ? pkg.dependencies as Record<string, unknown> : {}),
+      ...(pkg.devDependencies && typeof pkg.devDependencies === 'object' ? pkg.devDependencies as Record<string, unknown> : {}),
+    };
+
+    if (!repository && !pkg.homepage) {
+      this.addFinding({
+        severity: 'low',
+        category: 'Package Provenance',
+        title: 'Package has no repository or homepage metadata',
+        description: 'Package metadata does not point to auditable source code or project context.',
+        file: file.name,
+        remediation: 'Prefer packages with clear source repositories, maintainers, provenance, and release history.'
+      });
+    }
+
+    if (bin && Object.keys(scripts).some(script => ['preinstall', 'install', 'postinstall', 'prepare'].includes(script))) {
+      this.addFinding({
+        severity: 'high',
+        category: 'Package Install Surface',
+        title: 'CLI package also runs install-time scripts',
+        description: 'Packages with command-line entrypoints and lifecycle hooks have a larger execution surface during install and runtime.',
+        file: file.name,
+        remediation: 'Review lifecycle scripts and CLI entrypoints before installing globally or running through npx/pnpm dlx.'
+      });
+    }
+
+    for (const depName of Object.keys(dependencies)) {
+      if (this.looksLikeTyposquat(name, depName)) {
+        this.addFinding({
+          severity: 'high',
+          category: 'Package Dependencies',
+          title: 'Dependency name looks close to the package name',
+          description: `Dependency "${depName}" may indicate dependency confusion, typosquatting, or self-referential package confusion.`,
+          file: file.name,
+          remediation: 'Verify dependency identity, publisher, and purpose before installation.'
+        });
+      }
+    }
+  }
+
+  private checkVsCodeManifest(pkg: Record<string, unknown>, file: GitHubFile): void {
+    const isVsCodeExtension = Boolean(
+      pkg.activationEvents ||
+      pkg.contributes ||
+      pkg.publisher ||
+      (pkg.engines && typeof pkg.engines === 'object' && 'vscode' in pkg.engines)
+    );
+
+    if (!isVsCodeExtension) return;
+
+    const activationEvents = Array.isArray(pkg.activationEvents) ? pkg.activationEvents.map(String) : [];
+    const hasStartupActivation = activationEvents.some(event =>
+      event === '*' ||
+      event === 'onStartupFinished' ||
+      event.startsWith('workspaceContains:') ||
+      event.startsWith('onLanguage:')
+    );
+
+    if (hasStartupActivation) {
+      this.addFinding({
+        severity: activationEvents.includes('*') ? 'high' : 'medium',
+        category: 'VS Code Activation',
+        title: 'Broad extension activation detected',
+        description: 'The extension can activate automatically or across broad workspace contexts, increasing the blast radius of malicious code.',
+        file: file.name,
+        snippet: `"activationEvents": ${JSON.stringify(activationEvents)}`,
+        remediation: 'Prefer narrow activation events tied to explicit commands or specific languages.'
+      });
+    }
+
+    const contributes = pkg.contributes && typeof pkg.contributes === 'object'
+      ? pkg.contributes as Record<string, unknown>
+      : {};
+
+    if (contributes.configuration && hasStartupActivation) {
+      this.addFinding({
+        severity: 'medium',
+        category: 'VS Code Configuration',
+        title: 'Extension contributes settings and activates broadly',
+        description: 'Extensions that both activate broadly and control configuration deserve closer review.',
+        file: file.name,
+        remediation: 'Review configuration defaults and make sure settings do not silently enable network, shell, or credential access.'
+      });
+    }
+  }
+
+  private checkVsCodeExtensionBehavior(content: string, file: GitHubFile, lines: string[]): void {
+    if (!/from ['"`]vscode['"`]|require\(['"`]vscode['"`]\)|vscode\./i.test(content)) return;
+
+    const rules: Array<{ pattern: RegExp; severity: Severity; category: string; title: string; remediation: string }> = [
+      {
+        pattern: /(?:vscode\.)?window\.createTerminal|terminal\.sendText/gi,
+        severity: 'high',
+        category: 'VS Code Terminal',
+        title: 'Extension can run terminal commands',
+        remediation: 'Terminal execution should require explicit user action and visible commands.'
+      },
+      {
+        pattern: /(?:vscode\.)?workspace\.fs\.|workspace\.findFiles|workspace\.openTextDocument/gi,
+        severity: 'medium',
+        category: 'VS Code Workspace Access',
+        title: 'Extension can access workspace files',
+        remediation: 'Constrain workspace file access and avoid reading secrets, dotfiles, or unrelated project files.'
+      },
+      {
+        pattern: /(?:vscode\.)?env\.clipboard|clipboard\.readText|clipboard\.writeText/gi,
+        severity: 'high',
+        category: 'VS Code Clipboard',
+        title: 'Extension can access clipboard data',
+        remediation: 'Clipboard access should be explicit and scoped to user-initiated commands.'
+      },
+    ];
+
+    for (const rule of rules) {
+      const matches = Array.from(content.matchAll(rule.pattern));
+      for (const match of matches) {
+        const lineNumber = this.getLineNumber(content, match.index!);
+        const snippet = lines[lineNumber - 1]?.trim();
+        this.addFinding({
+          severity: rule.severity,
+          category: rule.category,
+          title: rule.title,
+          description: 'VS Code extensions run with developer-workstation access and can inspect or modify local project state.',
+          file: file.name,
+          line: lineNumber,
+          snippet,
+          remediation: rule.remediation
+        });
+      }
     }
   }
 
@@ -806,6 +950,15 @@ export class SecurityScanner {
   private isSensitiveEnvVar(envVar: string): boolean {
     const sensitivePatterns = ['KEY', 'TOKEN', 'SECRET', 'PASSWORD', 'AUTH', 'PRIVATE'];
     return sensitivePatterns.some(pattern => envVar.toUpperCase().includes(pattern));
+  }
+
+  private looksLikeTyposquat(packageName: string, dependencyName: string): boolean {
+    if (!packageName || !dependencyName) return false;
+    const normalize = (value: string) => value.replace(/^@[^/]+\//, '').replace(/[-_.]/g, '').toLowerCase();
+    const pkg = normalize(packageName);
+    const dep = normalize(dependencyName);
+    if (pkg.length < 5 || dep.length < 5 || pkg === dep) return false;
+    return dep.includes(pkg) || pkg.includes(dep);
   }
 
   private isDangerousLifecycleScript(script: string): boolean {

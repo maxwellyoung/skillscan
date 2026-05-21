@@ -10,12 +10,10 @@ const spring = {
   responsive: { type: 'spring' as const, stiffness: 400, damping: 30 },
   gentle: { type: 'spring' as const, stiffness: 100, damping: 20 },
   silk: { type: 'spring' as const, stiffness: 200, damping: 25 },
-  bouncy: { type: 'spring' as const, stiffness: 300, damping: 15 },
   heavy: { type: 'spring' as const, stiffness: 80, damping: 20 },
 };
 
 const EXAMPLES = [
-  { label: 'GitHub repo', value: 'https://github.com/maxwellyoung/skillscan' },
   { label: 'npm package', value: 'https://www.npmjs.com/package/eslint' },
   { label: 'OpenVSX extension', value: 'https://open-vsx.org/extension/esbenp/prettier-vscode' },
   {
@@ -37,33 +35,6 @@ const EXAMPLES = [
   {
     label: 'GitHub Action',
     value: `name: publish from pr\n\non:\n  pull_request_target:\n\npermissions: write-all\n\njobs:\n  publish:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: tj-actions/changed-files@v45\n      - run: npm publish\n        env:\n          NPM_TOKEN: \${{ secrets.NPM_TOKEN }}`,
-  },
-];
-
-const PROOF_POINTS = [
-  '29 deterministic checks',
-  'AI skills',
-  'npm packages',
-  'VS Code extensions',
-  'GitHub Actions',
-  'malicious fixture corpus',
-];
-
-const VALIDATION_POINTS = [
-  {
-    label: 'Malicious fixtures',
-    value: '13',
-    detail: 'Skill, npm, VS Code, registry-intel, tarball, VSIX, Python import-time, and CI workflow attacks must block.',
-  },
-  {
-    label: 'False-positive corpus',
-    value: '300',
-    detail: 'Installed Codex, agents, and plugin skills are scanned locally; critical or high findings fail the eval run.',
-  },
-  {
-    label: 'Regression gate',
-    value: '6',
-    detail: 'Tests, malicious fixtures, local skills, lint, production build, and browser checks run before release.',
   },
 ];
 
@@ -150,11 +121,11 @@ export default function Home() {
       </nav>
 
       {/* Scanner — the whole point */}
-      <main className="flex-1 flex flex-col items-center justify-center px-6 pb-24">
+      <main className="flex-1 flex flex-col items-center justify-center px-6 pb-20">
         <div className="w-full max-w-[560px]">
           {/* Title — one line, then gone */}
           <motion.h1
-            className="font-serif text-[32px] font-light tracking-[-0.02em] text-white mb-10 leading-[1.15]"
+            className="font-serif text-[32px] font-light tracking-[-0.02em] text-white mb-8 leading-[1.15]"
             style={{ fontFamily: "'Newsreader', serif" }}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
@@ -162,22 +133,6 @@ export default function Home() {
           >
             Know what you&apos;re installing.
           </motion.h1>
-
-          <motion.div
-            className="mb-5 flex flex-wrap gap-2"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ ...spring.gentle, delay: 0.03 }}
-          >
-            {PROOF_POINTS.map((point) => (
-              <span
-                key={point}
-                className="rounded-full border border-white/8 bg-white/[0.025] px-2.5 py-1 text-[11px] text-white/50"
-              >
-                {point}
-              </span>
-            ))}
-          </motion.div>
 
           {/* Input */}
           <motion.div
@@ -221,7 +176,7 @@ export default function Home() {
             {/* Examples — quiet text links */}
             <div className="flex flex-wrap items-center gap-3 mt-3 text-[12px] text-white/50">
               <span>try:</span>
-              {EXAMPLES.map((ex, i) => (
+              {EXAMPLES.slice(0, 4).map((ex, i) => (
                 <button
                   key={i}
                   onClick={() => {
@@ -300,18 +255,13 @@ export default function Home() {
 function ValidationSection() {
   return (
     <motion.section
-      className="mt-12 w-full max-w-[760px] border-t border-white/[0.06] pt-8"
+      className="mt-10 w-full max-w-[560px] border-t border-white/[0.06] pt-5"
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ ...spring.gentle, delay: 0.14 }}
     >
-      <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 className="text-[14px] font-medium text-white/70">Security validation</h2>
-          <p className="mt-1 max-w-[520px] text-[12px] leading-relaxed text-white/50">
-            SkillScan is tested against incident-derived malicious fixtures, benign controls, and a local false-positive corpus before production deploys.
-          </p>
-        </div>
+      <div className="flex flex-wrap items-center justify-between gap-3 text-[12px] text-white/50">
+        <p>29 checks. 13 malicious fixtures. 300-file false-positive corpus.</p>
         <a
           href="https://github.com/maxwellyoung/skillscan/tree/main/test/fixtures/malicious"
           target="_blank"
@@ -320,28 +270,6 @@ function ValidationSection() {
         >
           fixture corpus
         </a>
-      </div>
-
-      <div className="grid gap-2 sm:grid-cols-3">
-        {VALIDATION_POINTS.map((point) => (
-          <div key={point.label} className="rounded-md border border-white/[0.06] bg-white/[0.02] p-3">
-            <div className="flex items-baseline justify-between gap-3">
-              <p className="text-[11px] uppercase tracking-[0.12em] text-white/50">
-                {point.label}
-              </p>
-              <p className="text-[18px] tabular-nums text-white/70">{point.value}</p>
-            </div>
-            <p className="mt-2 text-[12px] leading-relaxed text-white/50">{point.detail}</p>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-4 flex flex-wrap gap-2 text-[11px] text-white/50">
-        {['pnpm test', 'pnpm eval:malicious', 'pnpm eval:local-skills', 'pnpm lint', 'pnpm build'].map((command) => (
-          <code key={command} className="rounded border border-white/[0.06] bg-black px-2 py-1">
-            {command}
-          </code>
-        ))}
       </div>
     </motion.section>
   );
@@ -368,11 +296,6 @@ function ScoreDisplay({ score, grade }: { score: number; grade: string }) {
       animate={{ opacity: 1, scale: 1 }}
       transition={spring.heavy}
     >
-      {/* Muriel Cooper glow layer */}
-      <div className={`score-glow ${color}`}>
-        <span className="text-[96px] font-extralight tabular-nums">{shown}</span>
-      </div>
-
       <span className={`text-[96px] font-extralight tabular-nums relative z-10 ${color}`}>
         {shown}
       </span>
@@ -496,24 +419,24 @@ function Results({ result }: { result: ScanResult }) {
         </motion.div>
       )}
 
-      <motion.div
-        className="grid grid-cols-5 gap-2 pb-5 pt-2 border-b border-white/[0.03]"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.34 }}
-      >
-        {severityEntries.map(([severity, count]) => (
-          <div key={severity} className="rounded-md border border-white/[0.05] bg-white/[0.02] px-2 py-2">
-            <div className="flex items-center gap-1.5">
+      {result.findings.length > 0 && (
+        <motion.div
+          className="flex flex-wrap gap-2 pb-5 pt-2 border-b border-white/[0.03]"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.34 }}
+        >
+          {severityEntries.filter(([, count]) => count > 0).map(([severity, count]) => (
+            <div key={severity} className="inline-flex items-center gap-2 rounded-full border border-white/[0.05] bg-white/[0.02] px-2.5 py-1.5">
               <span className={`h-1.5 w-1.5 rounded-full ${severityDot(severity)}`} />
               <span className="text-[10px] uppercase tracking-[0.12em] text-white/50">
                 {severity}
               </span>
+              <span className="text-[12px] tabular-nums text-white/70">{count}</span>
             </div>
-            <p className="mt-1 text-[18px] tabular-nums text-white/70">{count}</p>
-          </div>
-        ))}
-      </motion.div>
+          ))}
+        </motion.div>
+      )}
 
       {/* Findings */}
       {Object.keys(findingsByCategory).length === 0 && (
@@ -523,7 +446,7 @@ function Results({ result }: { result: ScanResult }) {
           animate={{ opacity: 1 }}
           transition={{ delay: 0.35 }}
         >
-          No findings surfaced by the current rule set. Treat this as first-pass evidence, not a formal audit.
+          No findings surfaced.
         </motion.div>
       )}
 

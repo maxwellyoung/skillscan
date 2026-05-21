@@ -1267,6 +1267,10 @@ export class SecurityScanner {
       score = Math.min(score, 55);
     }
 
+    if (criticalCount === 0) {
+      score = Math.max(score, highCount > 0 ? 45 : 65);
+    }
+
     return Math.max(0, Math.min(100, score));
   }
 

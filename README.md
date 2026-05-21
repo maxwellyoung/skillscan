@@ -1,8 +1,8 @@
-# SkillScan - ClawdHub Security Scanner
+# SkillScan
 
-**Every skill is guilty until proven safe.**
+Static security scanning for Claude Code skills and MCP servers.
 
-A fast, free security scanner for ClawdHub skills, Claude Code skills, and MCP servers. Born from the viral "It Got Worse - Clawdbot" video exposing the ClawdHub supply chain crisis.
+SkillScan checks local skill instructions, GitHub-hosted code, and MCP server repositories for risky patterns before you install or run them. It is intentionally fast and boring: static analysis, clear findings, and remediation notes.
 
 ## The ClawdHub Supply Chain Crisis
 
@@ -14,13 +14,21 @@ Nick Saraev's viral "It Got Worse - Clawdbot" video exposed:
 
 His advice? "Read every file or feed files to AI to check safety." **We automate that.**
 
+## What it demonstrates
+
+- Static analysis for a fast-moving AI tooling ecosystem.
+- GitHub URL, file, and direct-code scanning.
+- Risk scoring with severity, category, location, snippet, and remediation.
+- A focused security UI that avoids hiding findings behind generic AI summaries.
+- A public example of building small developer tools with practical failure modes.
+
 ## Features
 
-- 🔒 **ClawdHub Attack Detection** - Scans for real attack vectors from the crisis
-- ⚡ **Instant Scanning** - No AI needed, pure regex-based pattern matching
-- 🎯 **ClawdHub + GitHub Support** - Paste ClawdHub URLs directly
-- 📊 **Risk Scoring** - 0-100 security score with A-F grades
-- 🌙 **Security-Focused UI** - Built by and for security-conscious developers
+- ClawdHub and Claude Code skill attack detection.
+- MCP server and GitHub repository scanning.
+- 0-100 security score with A-F grades.
+- Pattern checks for shell execution, network access, file-system access, prompt injection, credential patterns, and data exfiltration.
+- No AI inference required for the core scan.
 
 ## 13 Security Checks
 
@@ -125,6 +133,16 @@ pnpm dev
 ```bash
 pnpm build
 ```
+
+### Quality Checks
+```bash
+pnpm lint
+pnpm build
+```
+
+## Case Study
+
+See [CASE_STUDY.md](./CASE_STUDY.md) for the product framing, tradeoffs, and next steps.
 
 ## Tech Stack
 

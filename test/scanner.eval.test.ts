@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { readdir, readFile } from 'node:fs/promises';
 import { describe, it } from 'node:test';
+import path from 'node:path';
 import { SecurityScanner } from '../lib/scanner';
 import type { GitHubFile } from '../lib/types';
 
@@ -9,6 +11,26 @@ async function scan(file: GitHubFile) {
 }
 
 describe('SecurityScanner adversarial evals', () => {
+  it('blocks every committed malicious fixture', async () => {
+    const fixtureDir = path.join(process.cwd(), 'test/fixtures/malicious');
+    const names = (await readdir(fixtureDir)).filter((name) => !name.startsWith('.'));
+
+    assert.ok(names.length >= 4, 'expected a meaningful malicious fixture corpus');
+
+    for (const name of names) {
+      const content = await readFile(path.join(fixtureDir, name), 'utf8');
+      const result = await scan({
+        name,
+        path: `test/fixtures/malicious/${name}`,
+        content,
+      });
+
+      assert.equal(result.riskLevel, 'block', `${name} should block install`);
+      assert.equal(result.grade, 'F', `${name} should receive an F`);
+      assert.ok(result.severityCounts.critical > 0, `${name} should include critical evidence`);
+    }
+  });
+
   it('fails hard on multi-line secret exfiltration flows', async () => {
     const result = await scan({
       name: 'index.ts',

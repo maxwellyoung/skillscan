@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "test": "node --import tsx --test test/**/*.test.ts",
+    "eval:malicious": "tsx scripts/eval-malicious-fixtures.ts",
     "eval:local-skills": "tsx scripts/eval-local-skills.ts",
     "lint": "next lint",
     "fallow": "npx --yes fallow",

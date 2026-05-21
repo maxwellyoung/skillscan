@@ -30,7 +30,8 @@ His advice? "Read every file or feed files to AI to check safety." **We automate
 - Pattern checks for shell execution, network access, file-system access, prompt injection, credential patterns, and data exfiltration.
 - No AI inference required for the core scan.
 - Explicit install verdicts: pass, manual review, or block install.
-- Adversarial evals for token exfiltration, malicious install hooks, hostile skill instructions, and benign documentation false positives.
+- Committed malicious fixture corpus for token exfiltration, malicious install hooks, hostile skill instructions, and persistence attempts.
+- False-positive eval against installed local Codex, agents, and plugin skills.
 
 ## Security Checks
 
@@ -55,11 +56,23 @@ Based on real ClawdHub compromises and supply chain attacks:
 
 ## Evaluation Harness
 
-The scanner has adversarial evals for cases that should fail hard and benign cases that should stay quiet:
+The scanner has adversarial evals for cases that should fail hard and benign cases that should stay quiet.
+
+Committed malicious fixtures live in `test/fixtures/malicious` and cover:
 
 - Multi-line secret exfiltration through outbound requests.
 - `postinstall` scripts that fetch and execute remote code.
 - `SKILL.md` instructions that request broad tools, secrets, and webhook transmission.
+- Persistence attempts through launch agents, SSH authorized keys, and broad file permission changes.
+
+Those fixtures must all produce `riskLevel: "block"`:
+
+```bash
+pnpm eval:malicious
+```
+
+The unit suite also covers benign cases that should not become noisy:
+
 - Security documentation that mentions tokens without being treated as executable theft.
 - Local app code using `NEXT_PUBLIC_*` env vars and relative API routes.
 
@@ -69,7 +82,7 @@ Run them with:
 pnpm test
 ```
 
-For a local false-positive corpus, scan the installed Codex/agents/plugin skills:
+For a local false-positive corpus, scan the installed Codex, agents, and plugin skills:
 
 ```bash
 pnpm eval:local-skills
@@ -166,6 +179,7 @@ pnpm build
 ### Quality Checks
 ```bash
 pnpm test
+pnpm eval:malicious
 pnpm eval:local-skills
 pnpm lint
 pnpm build

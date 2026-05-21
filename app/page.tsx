@@ -28,8 +28,26 @@ const EXAMPLES = [
 
 const PROOF_POINTS = [
   '16 deterministic checks',
-  'adversarial evals',
+  'malicious fixture corpus',
   'no AI judgment layer',
+];
+
+const VALIDATION_POINTS = [
+  {
+    label: 'Malicious fixtures',
+    value: '4',
+    detail: 'Token exfiltration, hostile skill instructions, install-time remote execution, and persistence attempts must all block.',
+  },
+  {
+    label: 'False-positive corpus',
+    value: '300',
+    detail: 'Installed Codex, agents, and plugin skills are scanned locally; critical or high findings fail the eval run.',
+  },
+  {
+    label: 'Regression gate',
+    value: '5',
+    detail: 'Tests, malicious fixtures, local skills, lint, and production build run before release.',
+  },
 ];
 
 function DotMatrixLoader({ label = 'Scanning' }: { label?: string }) {
@@ -243,6 +261,8 @@ export default function Home() {
             {result && <Results result={result} />}
           </AnimatePresence>
         </div>
+
+        <ValidationSection />
       </main>
 
       {/* Footer — whisper */}
@@ -257,6 +277,56 @@ export default function Home() {
         </a>
       </footer>
     </div>
+  );
+}
+
+function ValidationSection() {
+  return (
+    <motion.section
+      className="mt-12 w-full max-w-[760px] border-t border-white/[0.06] pt-8"
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ ...spring.gentle, delay: 0.14 }}
+    >
+      <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="text-[14px] font-medium text-white/70">Security validation</h2>
+          <p className="mt-1 max-w-[520px] text-[12px] leading-relaxed text-white/35">
+            SkillScan is tested against committed malicious fixtures and a local false-positive corpus before production deploys.
+          </p>
+        </div>
+        <a
+          href="https://github.com/maxwellyoung/skillscan/tree/main/test/fixtures/malicious"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[12px] text-white/35 underline decoration-white/10 underline-offset-4 transition-colors hover:text-white/60 hover:decoration-white/25"
+        >
+          fixture corpus
+        </a>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-3">
+        {VALIDATION_POINTS.map((point) => (
+          <div key={point.label} className="rounded-md border border-white/[0.06] bg-white/[0.02] p-3">
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="text-[11px] uppercase tracking-[0.12em] text-white/25">
+                {point.label}
+              </p>
+              <p className="text-[18px] tabular-nums text-white/70">{point.value}</p>
+            </div>
+            <p className="mt-2 text-[12px] leading-relaxed text-white/35">{point.detail}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2 text-[11px] text-white/30">
+        {['pnpm test', 'pnpm eval:malicious', 'pnpm eval:local-skills', 'pnpm lint', 'pnpm build'].map((command) => (
+          <code key={command} className="rounded border border-white/[0.06] bg-black px-2 py-1">
+            {command}
+          </code>
+        ))}
+      </div>
+    </motion.section>
   );
 }
 

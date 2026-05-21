@@ -677,8 +677,14 @@ export class SecurityScanner {
   }
 
   private isInstructionFile(fileName: string): boolean {
-    const base = fileName.split('/').pop()?.toLowerCase();
-    return base === 'skill.md' || base === 'agents.md' || base === 'claude.md' || base === 'readme.md';
+    const base = fileName.split('/').pop()?.toLowerCase() ?? '';
+    return base === 'skill.md' ||
+      base === 'agents.md' ||
+      base === 'claude.md' ||
+      base === 'readme.md' ||
+      base?.endsWith('.skill.md') ||
+      base?.endsWith('.agents.md') ||
+      base?.endsWith('.claude.md');
   }
 
   private checkSkillInstructions(content: string, file: GitHubFile, lines: string[]): void {

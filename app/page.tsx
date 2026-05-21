@@ -134,7 +134,7 @@ export default function Home() {
       {/* Nav — barely there */}
       <nav className="px-6 py-5 flex items-center justify-between">
         <span className="text-[15px] font-medium tracking-[-0.01em]">SkillScan</span>
-        <div className="flex items-center gap-5 text-[13px] text-white/40">
+        <div className="flex items-center gap-5 text-[13px] text-white/50">
           <Link href="/pricing" className="hover:text-white/70 transition-colors duration-200">
             Pricing
           </Link>
@@ -172,7 +172,7 @@ export default function Home() {
             {PROOF_POINTS.map((point) => (
               <span
                 key={point}
-                className="rounded-full border border-white/8 bg-white/[0.025] px-2.5 py-1 text-[11px] text-white/35"
+                className="rounded-full border border-white/8 bg-white/[0.025] px-2.5 py-1 text-[11px] text-white/50"
               >
                 {point}
               </span>
@@ -202,13 +202,13 @@ export default function Home() {
                 onFocus={() => setFocused(true)}
                 onBlur={() => setFocused(false)}
                 placeholder="Paste a GitHub, ClawdHub, npm, or OpenVSX URL. Or paste code/workflows directly..."
-                className="w-full bg-white/[0.03] rounded-lg px-4 py-4 text-[14px] text-white/90 placeholder:text-white/20 resize-none leading-relaxed transition-colors duration-200"
+                className="w-full bg-white/[0.03] rounded-lg px-4 py-4 text-[14px] text-white/90 placeholder:text-white/50 resize-none leading-relaxed transition-colors duration-200"
                 rows={input.includes('\n') ? Math.min(input.split('\n').length + 1, 10) : 3}
                 onKeyDown={(e) => e.key === 'Enter' && e.metaKey && scan()}
               />
               {input.trim() && (
                 <motion.span
-                  className="absolute top-3 right-3 text-[11px] text-white/20 font-mono"
+                  className="absolute top-3 right-3 text-[11px] text-white/50 font-mono"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={spring.responsive}
@@ -219,7 +219,7 @@ export default function Home() {
             </div>
 
             {/* Examples — quiet text links */}
-            <div className="flex flex-wrap items-center gap-3 mt-3 text-[12px] text-white/25">
+            <div className="flex flex-wrap items-center gap-3 mt-3 text-[12px] text-white/50">
               <span>try:</span>
               {EXAMPLES.map((ex, i) => (
                 <button
@@ -253,7 +253,7 @@ export default function Home() {
             >
               {scanning ? <DotMatrixLoader /> : 'Scan'}
             </motion.button>
-            <p className="text-center text-[11px] text-white/15 mt-2.5">
+            <p className="text-center text-[11px] text-white/50 mt-2.5">
               {'\u2318'} + Enter
             </p>
           </motion.div>
@@ -283,12 +283,12 @@ export default function Home() {
       </main>
 
       {/* Footer — whisper */}
-      <footer className="px-6 py-5 text-[12px] text-white/20">
+      <footer className="px-6 py-5 text-[12px] text-white/50">
         <a
           href="https://ninetynine.digital"
           target="_blank"
           rel="noopener noreferrer"
-          className="hover:text-white/40 transition-colors duration-200"
+          className="hover:text-white/50 transition-colors duration-200"
         >
           ninetynine.digital
         </a>
@@ -308,7 +308,7 @@ function ValidationSection() {
       <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 className="text-[14px] font-medium text-white/70">Security validation</h2>
-          <p className="mt-1 max-w-[520px] text-[12px] leading-relaxed text-white/35">
+          <p className="mt-1 max-w-[520px] text-[12px] leading-relaxed text-white/50">
             SkillScan is tested against incident-derived malicious fixtures, benign controls, and a local false-positive corpus before production deploys.
           </p>
         </div>
@@ -316,7 +316,7 @@ function ValidationSection() {
           href="https://github.com/maxwellyoung/skillscan/tree/main/test/fixtures/malicious"
           target="_blank"
           rel="noopener noreferrer"
-          className="text-[12px] text-white/35 underline decoration-white/10 underline-offset-4 transition-colors hover:text-white/60 hover:decoration-white/25"
+          className="text-[12px] text-white/50 underline decoration-white/10 underline-offset-4 transition-colors hover:text-white/60 hover:decoration-white/25"
         >
           fixture corpus
         </a>
@@ -326,17 +326,17 @@ function ValidationSection() {
         {VALIDATION_POINTS.map((point) => (
           <div key={point.label} className="rounded-md border border-white/[0.06] bg-white/[0.02] p-3">
             <div className="flex items-baseline justify-between gap-3">
-              <p className="text-[11px] uppercase tracking-[0.12em] text-white/25">
+              <p className="text-[11px] uppercase tracking-[0.12em] text-white/50">
                 {point.label}
               </p>
               <p className="text-[18px] tabular-nums text-white/70">{point.value}</p>
             </div>
-            <p className="mt-2 text-[12px] leading-relaxed text-white/35">{point.detail}</p>
+            <p className="mt-2 text-[12px] leading-relaxed text-white/50">{point.detail}</p>
           </div>
         ))}
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2 text-[11px] text-white/30">
+      <div className="mt-4 flex flex-wrap gap-2 text-[11px] text-white/50">
         {['pnpm test', 'pnpm eval:malicious', 'pnpm eval:local-skills', 'pnpm lint', 'pnpm build'].map((command) => (
           <code key={command} className="rounded border border-white/[0.06] bg-black px-2 py-1">
             {command}
@@ -467,7 +467,7 @@ function Results({ result }: { result: ScanResult }) {
 
       {/* Stats */}
       <motion.div
-        className="flex flex-wrap gap-x-8 gap-y-2 text-[12px] text-white/30 pb-5 border-b border-white/5"
+        className="flex flex-wrap gap-x-8 gap-y-2 text-[12px] text-white/50 pb-5 border-b border-white/5"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.3 }}
@@ -506,7 +506,7 @@ function Results({ result }: { result: ScanResult }) {
           <div key={severity} className="rounded-md border border-white/[0.05] bg-white/[0.02] px-2 py-2">
             <div className="flex items-center gap-1.5">
               <span className={`h-1.5 w-1.5 rounded-full ${severityDot(severity)}`} />
-              <span className="text-[10px] uppercase tracking-[0.12em] text-white/25">
+              <span className="text-[10px] uppercase tracking-[0.12em] text-white/50">
                 {severity}
               </span>
             </div>
@@ -518,7 +518,7 @@ function Results({ result }: { result: ScanResult }) {
       {/* Findings */}
       {Object.keys(findingsByCategory).length === 0 && (
         <motion.div
-          className="py-8 text-[13px] text-white/35"
+          className="py-8 text-[13px] text-white/50"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.35 }}
@@ -542,12 +542,12 @@ function Results({ result }: { result: ScanResult }) {
               <span className="text-[14px] text-white/70 group-hover:text-white/90 transition-colors duration-200">
                 {category}
               </span>
-              <span className="text-[11px] text-white/20 tabular-nums">
+              <span className="text-[11px] text-white/50 tabular-nums">
                 {findings.length}
               </span>
             </div>
             <motion.span
-              className="text-[11px] text-white/20"
+              className="text-[11px] text-white/50"
               animate={{ rotate: expanded.has(category) ? 90 : 0 }}
               transition={spring.responsive}
             >
@@ -581,14 +581,14 @@ function Results({ result }: { result: ScanResult }) {
                           <p className="text-[13px] text-white/80 leading-snug">
                             {finding.title}
                           </p>
-                          <p className="text-[12px] text-white/35 leading-relaxed mt-0.5">
+                          <p className="text-[12px] text-white/50 leading-relaxed mt-0.5">
                             {finding.description}
                           </p>
                         </div>
 
                         {finding.snippet && (
                           <div className="code-block">
-                            <div className="text-[11px] text-white/20 mb-1.5 font-sans">
+                            <div className="text-[11px] text-white/50 mb-1.5 font-sans">
                               {finding.file}
                               {finding.line && `:${finding.line}`}
                             </div>
@@ -604,7 +604,7 @@ function Results({ result }: { result: ScanResult }) {
                         )}
 
                         {finding.remediation && (
-                          <p className="text-[12px] text-white/30 leading-relaxed pl-3 border-l border-white/8">
+                          <p className="text-[12px] text-white/50 leading-relaxed pl-3 border-l border-white/8">
                             {finding.remediation}
                           </p>
                         )}

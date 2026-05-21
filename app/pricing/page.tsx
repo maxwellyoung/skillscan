@@ -133,7 +133,7 @@ export default function PricingPage() {
             >
               {tier.highlighted && (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                  <span className="bg-accent text-white text-xs font-medium px-3 py-1 rounded-full">
+                  <span className="bg-accent text-black text-xs font-medium px-3 py-1 rounded-full">
                     Most Popular
                   </span>
                 </div>
@@ -176,7 +176,7 @@ export default function PricingPage() {
                   <li key={i} className="flex items-start gap-2.5 text-sm">
                     <Check
                       className={`w-4 h-4 mt-0.5 flex-shrink-0 ${
-                        tier.highlighted ? 'text-accent' : 'text-white/40'
+                        tier.highlighted ? 'text-accent' : 'text-white/60'
                       }`}
                     />
                     <span className="text-white/80">{feature}</span>
@@ -188,9 +188,9 @@ export default function PricingPage() {
                 href={tier.ctaLink}
                 className={`block text-center py-3.5 rounded-lg text-sm font-medium transition-all ${
                   tier.highlighted
-                    ? 'bg-accent hover:bg-accent/90 text-white'
+                    ? 'bg-accent hover:bg-accent text-black'
                     : 'bg-white/5 hover:bg-white/10 text-white border border-white/10'
-                } ${tier.cta === 'Coming Soon' ? 'opacity-80 cursor-default' : ''}`}
+                } ${tier.cta === 'Coming Soon' ? 'cursor-default' : ''}`}
                 whileHover={tier.cta !== 'Coming Soon' ? { y: -2 } : {}}
                 whileTap={tier.cta !== 'Coming Soon' ? { scale: 0.98 } : {}}
               >

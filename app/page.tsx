@@ -41,7 +41,7 @@ const EXAMPLES = [
 ];
 
 const PROOF_POINTS = [
-  '25 deterministic checks',
+  '29 deterministic checks',
   'AI skills',
   'npm packages',
   'VS Code extensions',
@@ -52,8 +52,8 @@ const PROOF_POINTS = [
 const VALIDATION_POINTS = [
   {
     label: 'Malicious fixtures',
-    value: '10',
-    detail: 'Skill, npm, VS Code, registry-intel, and CI workflow attacks for token theft, install execution, and release-pipeline abuse must block.',
+    value: '13',
+    detail: 'Skill, npm, VS Code, registry-intel, tarball, VSIX, Python import-time, and CI workflow attacks must block.',
   },
   {
     label: 'False-positive corpus',
@@ -476,7 +476,25 @@ function Results({ result }: { result: ScanResult }) {
         <span>{result.linesAnalyzed.toLocaleString()} lines</span>
         <span>{result.checksRun} checks</span>
         <span>{result.findings.length} findings</span>
+        {result.sourceType && <span>{result.sourceType}</span>}
+        {result.fetchedAt && <span>{new Date(result.fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
       </motion.div>
+
+      {(result.partial || Boolean(result.scanWarnings?.length)) && (
+        <motion.div
+          className="mt-4 rounded-md border border-amber-400/15 bg-amber-500/[0.045] px-3 py-2.5 text-[12px] text-amber-100/70"
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.32 }}
+        >
+          <p className="font-medium text-amber-100/80">Partial artifact evidence</p>
+          <div className="mt-1 space-y-1">
+            {(result.scanWarnings || ['Some source artifacts could not be fetched or unpacked.']).slice(0, 3).map((warning) => (
+              <p key={warning}>{warning}</p>
+            ))}
+          </div>
+        </motion.div>
+      )}
 
       <motion.div
         className="grid grid-cols-5 gap-2 pb-5 pt-2 border-b border-white/[0.03]"

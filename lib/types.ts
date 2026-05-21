@@ -8,6 +8,10 @@ export interface ScanResult {
   scannedFiles: number;
   linesAnalyzed: number;
   checksRun: number;
+  sourceType?: 'code' | 'github' | 'npm' | 'openvsx';
+  fetchedAt?: string;
+  partial?: boolean;
+  scanWarnings?: string[];
 }
 
 export interface Finding {
@@ -30,4 +34,12 @@ export interface GitHubFile {
   name: string;
   content: string;
   path: string;
+}
+
+export interface FetchBundle {
+  files: GitHubFile[];
+  sourceType: NonNullable<ScanResult['sourceType']>;
+  fetchedAt: string;
+  partial: boolean;
+  warnings: string[];
 }

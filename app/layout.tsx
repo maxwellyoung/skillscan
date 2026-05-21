@@ -11,14 +11,14 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://skillscan.dev"),
   title: "SkillScan – Security Scanner for AI Skills, npm & VS Code",
   description:
-    "Free, instant security scanning for AI skills, MCP servers, npm packages, VS Code extensions, GitHub Actions, and GitHub repos. 25 deterministic checks. Know what you're installing before it accesses your system.",
+    "Free, instant security scanning for AI skills, MCP servers, npm packages, VS Code extensions, GitHub Actions, and GitHub repos. 29 deterministic checks. Know what you're installing before it accesses your system.",
   keywords:
     "claude code, mcp, npm security, vscode extension security, security scanner, static analysis, skill scanner, ai security, vulnerability scanner, github security, code analysis, supply chain security",
   authors: [{ name: "ninetynine.digital", url: "https://ninetynine.digital" }],
   openGraph: {
     title: "SkillScan – Security Scanner for AI Skills, npm & VS Code",
     description:
-      "Free, instant security analysis for AI skills, npm packages, VS Code extensions, GitHub Actions, and MCP servers. 25 deterministic checks. Know what you're installing.",
+      "Free, instant security analysis for AI skills, npm packages, VS Code extensions, GitHub Actions, and MCP servers. 29 deterministic checks. Know what you're installing.",
     url: "https://skillscan.dev",
     siteName: "SkillScan",
     type: "website",

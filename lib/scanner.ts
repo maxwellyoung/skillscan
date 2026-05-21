@@ -2,7 +2,7 @@ import { Finding, ScanResult, GitHubFile } from './types';
 
 type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 
-const CHECKS_RUN = 25;
+const CHECKS_RUN = 29;
 const severityRank: Record<Severity, number> = {
   critical: 0,
   high: 1,
@@ -238,7 +238,7 @@ export class SecurityScanner {
 
   private checkExecCalls(content: string, file: GitHubFile, lines: string[]): void {
     const patterns = [
-      /(?:exec|spawn|execSync|spawnSync|execFile|execFileSync)\s*\(/g,
+      /(?<![.\w$])(?:exec|spawn|execSync|spawnSync|execFile|execFileSync)\s*\(/g,
       /child_process\.\w+\(/g,
       /process\.exec\(/g,
       /import.*child_process/g,
@@ -250,7 +250,7 @@ export class SecurityScanner {
       for (const match of matches) {
         const lineNumber = this.getLineNumber(content, match.index!);
         const snippet = lines[lineNumber - 1]?.trim();
-        const severity = this.isUnboundedExec(snippet) ? 'critical' : 'high';
+        const severity = this.isUnboundedExec(snippet) && !this.isExtractedArtifactFile(file) ? 'critical' : 'high';
 
         this.addFinding({
           severity: this.adjustSeverity(severity, file, match.index),
@@ -269,6 +269,8 @@ export class SecurityScanner {
   private checkNetworkRequests(content: string, file: GitHubFile, lines: string[]): void {
     const patterns = [
       /(?:fetch|axios|http\.get|http\.post|http\.request|https\.get|https\.post|https\.request)\s*\(/g,
+      /requests\.(?:get|post|put|patch|request)\s*\(/g,
+      /urllib\.request\.(?:urlopen|Request)\s*\(/g,
       /new\s+(?:XMLHttpRequest|WebSocket)\s*\(/g,
       /import.*(?:axios|node-fetch|request)/g,
       /require\(['"`](?:axios|node-fetch|request|http|https)['"`]\)/g
@@ -329,6 +331,7 @@ export class SecurityScanner {
   private checkEnvironmentAccess(content: string, file: GitHubFile, lines: string[]): void {
     const patterns = [
       /process\.env\[?['"`]?(\w+)['"`]?\]?/g,
+      /os\.environ(?:\.get)?\(\s*['"`]([A-Z0-9_]+)['"`]/g,
     ];
 
     patterns.forEach(pattern => {
@@ -373,7 +376,7 @@ export class SecurityScanner {
         const snippet = lines[lineNumber - 1]?.trim();
 
         this.addFinding({
-          severity: this.adjustSeverity('critical', file, match.index),
+          severity: this.adjustSeverity(this.isExtractedArtifactFile(file) ? 'high' : 'critical', file, match.index),
           category: 'Dynamic Execution',
           title: 'Dynamic code execution detected',
           description: 'Code uses eval() or Function constructor which can execute arbitrary code strings.',
@@ -417,6 +420,7 @@ export class SecurityScanner {
     // Only check for hex-encoded strings and very long string literals
     // Skip doc files entirely for obfuscation (long lines in docs are normal)
     if (this.isDocFile(file.name)) return;
+    if (file.name.endsWith('.json')) return;
 
     const hexPattern = /['"`]\\x[0-9a-fA-F]{2}(?:\\x[0-9a-fA-F]{2}){3,}/g;
     const longStringPattern = /['"`][^'"`\n]{500,}['"`]/g;
@@ -430,7 +434,7 @@ export class SecurityScanner {
         const snippet = lines[lineNumber - 1]?.trim().substring(0, 100) + '...';
 
         this.addFinding({
-          severity: 'high',
+          severity: this.isExtractedArtifactFile(file) ? 'medium' : 'high',
           category: 'Code Obfuscation',
           title: 'Obfuscated code detected',
           description: 'Code contains obfuscated strings or patterns that could hide malicious functionality.',
@@ -618,7 +622,9 @@ export class SecurityScanner {
   }
 
   private checkSecretExfiltrationFlow(content: string, file: GitHubFile, lines: string[]): void {
-    const sensitiveEnvReads = Array.from(content.matchAll(/process\.env(?:\.([A-Z0-9_]+)|\[['"`]([A-Z0-9_]+)['"`]\])/gi))
+    const jsEnvReads = Array.from(content.matchAll(/process\.env(?:\.([A-Z0-9_]+)|\[['"`]([A-Z0-9_]+)['"`]\])/gi));
+    const pythonEnvReads = Array.from(content.matchAll(/os\.environ(?:\.get)?\(\s*['"`]([A-Z0-9_]+)['"`]/gi));
+    const sensitiveEnvReads = [...jsEnvReads, ...pythonEnvReads]
       .filter(match => this.isSensitiveEnvVar(match[1] || match[2] || ''));
 
     if (sensitiveEnvReads.length === 0) return;
@@ -628,11 +634,14 @@ export class SecurityScanner {
       /axios\.(?:post|put|patch|request)\s*\(\s*['"`]https?:\/\//gi,
       /https?\.request\s*\(/gi,
       /https?\.post\s*\(/gi,
+      /requests\.(?:post|put|patch|request)\s*\(\s*['"`]https?:\/\//gi,
+      /urllib\.request\.(?:urlopen|Request)\s*\(/gi,
       /discord\.com\/api\/webhooks\//gi,
       /hooks\.slack\.com\/services\//gi,
       /webhook\.site/gi,
       /requestbin\.com/gi,
       /pipedream\.com/gi,
+      /api\.github\.com\/repos\//gi,
     ];
 
     const hasOutbound = outboundPatterns.some(pattern => pattern.test(content));
@@ -671,11 +680,18 @@ export class SecurityScanner {
         remediation: 'Do not read or modify SSH keys or authorized_keys from installable skills or MCP servers.'
       },
       {
-        pattern: /(?:curl|wget)\b[^|\n]*(?:\|\s*(?:bash|sh|zsh)|>\s*\/tmp\/)/gi,
+        pattern: /(?:curl|wget)\b[^|\n]*(?:\|\s*(?:bash|sh|zsh)|>\s*\/tmp\/|-o\s+\/tmp\/|--output\s+\/tmp\/)/gi,
         category: 'Remote Code Execution',
         title: 'Remote script execution pattern detected',
         severity: 'critical',
         remediation: 'Avoid curl-pipe-shell patterns. Pin, verify, and inspect downloaded artifacts before execution.'
+      },
+      {
+        pattern: /github\.com\/[^/\s]+\/[^/\s]+\/releases\/download\/[^\s]+|\bbun(?:-linux|-darwin|-windows)?\b|router_runtime\.js|execution\.js/gi,
+        category: 'Runtime Downloader',
+        title: 'Incident-style runtime downloader detected',
+        severity: 'critical',
+        remediation: 'Block packages that download runtimes or second-stage payloads from GitHub Releases during install or import.'
       },
       {
         pattern: /rm\s+-rf\s+(?:~|\/|\$HOME|process\.env\.HOME)/gi,
@@ -722,6 +738,10 @@ export class SecurityScanner {
       base?.endsWith('.skill.md') ||
       base?.endsWith('.agents.md') ||
       base?.endsWith('.claude.md');
+  }
+
+  private isExtractedArtifactFile(file: GitHubFile): boolean {
+    return file.path.includes('/tarball/') || file.path.includes('/vsix/');
   }
 
   private checkSkillInstructions(content: string, file: GitHubFile, lines: string[]): void {
@@ -807,6 +827,7 @@ export class SecurityScanner {
       });
 
       this.checkNpmPackageMetadata(pkg, file);
+      this.checkOptionalDependencyRisk(pkg, file);
       this.checkVsCodeManifest(pkg, file);
 
     } catch {
@@ -862,6 +883,30 @@ export class SecurityScanner {
           description: `Dependency "${depName}" may indicate dependency confusion, typosquatting, or self-referential package confusion.`,
           file: file.name,
           remediation: 'Verify dependency identity, publisher, and purpose before installation.'
+        });
+      }
+    }
+  }
+
+  private checkOptionalDependencyRisk(pkg: Record<string, unknown>, file: GitHubFile): void {
+    const optionalDependencies = pkg.optionalDependencies && typeof pkg.optionalDependencies === 'object'
+      ? pkg.optionalDependencies as Record<string, unknown>
+      : {};
+
+    for (const [name, spec] of Object.entries(optionalDependencies)) {
+      const value = String(spec);
+      const isGitDependency = /github:|git\+https?:|https:\/\/github\.com/i.test(value);
+      const isRuntimeName = /bun|runtime|loader|install|setup/i.test(name);
+
+      if (isGitDependency || isRuntimeName) {
+        this.addFinding({
+          severity: isGitDependency ? 'high' : 'medium',
+          category: 'Optional Dependencies',
+          title: 'Optional dependency can expand install-time execution surface',
+          description: 'Recent supply-chain campaigns used optional dependencies and GitHub-hosted payloads to execute malware during installation.',
+          file: file.name,
+          snippet: `"${name}": "${value}"`,
+          remediation: 'Review optional dependencies carefully, especially GitHub-hosted specs or runtime/bootstrap packages.'
         });
       }
     }

@@ -3,6 +3,7 @@ import { GitHubFetcher } from '@/lib/github';
 import { RegistryFetcher } from '@/lib/registry';
 import { SecurityScanner } from '@/lib/scanner';
 import { ScanRequest, GitHubFile } from '@/lib/types';
+import type { ScanResult } from '@/lib/types';
 
 function inferPastedFileName(code: string): string {
   const trimmed = code.trim();
@@ -39,6 +40,10 @@ export async function POST(request: NextRequest) {
     const body: ScanRequest = await request.json();
     const url = body.url?.trim();
     const code = body.code?.trim();
+    let sourceType: ScanResult['sourceType'] = code ? 'code' : undefined;
+    let fetchedAt: string | undefined;
+    let partial = false;
+    let scanWarnings: string[] = [];
     
     if (!code && !url) {
       return NextResponse.json(
@@ -72,6 +77,8 @@ export async function POST(request: NextRequest) {
             // Repository URL (including ClawdHub)
             files = await GitHubFetcher.fetchRepo(url);
           }
+          sourceType = 'github';
+          fetchedAt = new Date().toISOString();
         } catch (error) {
           console.error('Fetch error:', error);
           
@@ -89,7 +96,12 @@ export async function POST(request: NextRequest) {
         }
       } else if (RegistryFetcher.isNpmUrl(url)) {
         try {
-          files = await RegistryFetcher.fetchNpm(url);
+          const bundle = await RegistryFetcher.fetchNpm(url);
+          files = bundle.files;
+          sourceType = bundle.sourceType;
+          fetchedAt = bundle.fetchedAt;
+          partial = bundle.partial;
+          scanWarnings = bundle.warnings;
         } catch (error) {
           console.error('npm fetch error:', error);
           return NextResponse.json(
@@ -99,7 +111,12 @@ export async function POST(request: NextRequest) {
         }
       } else if (RegistryFetcher.isOpenVsxUrl(url)) {
         try {
-          files = await RegistryFetcher.fetchOpenVsx(url);
+          const bundle = await RegistryFetcher.fetchOpenVsx(url);
+          files = bundle.files;
+          sourceType = bundle.sourceType;
+          fetchedAt = bundle.fetchedAt;
+          partial = bundle.partial;
+          scanWarnings = bundle.warnings;
         } catch (error) {
           console.error('OpenVSX fetch error:', error);
           return NextResponse.json(
@@ -117,6 +134,8 @@ export async function POST(request: NextRequest) {
 
     if (code) {
       const name = inferPastedFileName(code);
+      sourceType = 'code';
+      fetchedAt = new Date().toISOString();
       files = [{
         name,
         content: code,
@@ -135,7 +154,13 @@ export async function POST(request: NextRequest) {
     const scanner = new SecurityScanner();
     const result = await scanner.scan(files);
 
-    return NextResponse.json(result);
+    return NextResponse.json({
+      ...result,
+      sourceType,
+      fetchedAt,
+      partial,
+      scanWarnings,
+    });
 
   } catch (error) {
     console.error('Scan error:', error);

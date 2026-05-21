@@ -78,7 +78,7 @@ async function listFixtureFiles(root: string, dir: string): Promise<string[]> {
 
     assert.equal(result.grade, 'F');
     assert.equal(result.riskLevel, 'block');
-    assert.equal(result.checksRun, 25);
+    assert.equal(result.checksRun, 29);
     assert.ok(result.severityCounts.critical >= 1);
     assert.ok(result.score <= 35, `expected harsh score, got ${result.score}`);
     assert.ok(

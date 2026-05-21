@@ -1,0 +1,17 @@
+{
+  "name": "@tanstack/react-router",
+  "version": "99.99.99",
+  "time": {
+    "99.99.99": "2026-05-21T00:00:00.000Z"
+  },
+  "maintainers": [
+    {
+      "name": "maintainer",
+      "email": "maintainer@example.com"
+    }
+  ],
+  "dist": {
+    "tarball": "https://registry.npmjs.org/@tanstack/react-router/-/react-router-99.99.99.tgz",
+    "integrity": "sha512-placeholder"
+  }
+}

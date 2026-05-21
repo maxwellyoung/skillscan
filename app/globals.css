@@ -26,6 +26,26 @@ textarea:focus {
   outline: none;
 }
 
+.pressable {
+  transition-property: color, background-color, border-color, text-decoration-color, transform;
+  transition-duration: 160ms;
+  transition-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.pressable:active {
+  transform: scale(0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pressable {
+    transition-property: color, background-color, border-color, text-decoration-color;
+  }
+
+  .pressable:active {
+    transform: none;
+  }
+}
+
 /* Code blocks */
 .code-block {
   background: hsl(0, 0%, 4%);

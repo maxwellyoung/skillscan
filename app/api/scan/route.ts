@@ -11,6 +11,10 @@ function inferPastedFileName(code: string): string {
     return 'SKILL.md';
   }
 
+  if (/\bon\s*:\s*[\s\S]{0,500}\bjobs\s*:/i.test(trimmed) || /\bpull_request_target\b[\s\S]{0,500}\bjobs\s*:/i.test(trimmed)) {
+    return 'pasted.workflow.yml';
+  }
+
   try {
     const json = JSON.parse(trimmed);
     if (json?.engines?.vscode || json?.activationEvents || json?.contributes) {
@@ -147,7 +151,7 @@ export async function GET() {
     { 
       message: 'SkillScan Security Scanner API',
       endpoints: {
-        'POST /api/scan': 'Scan code, GitHub repositories, npm packages, OpenVSX extensions, or supported skill-directory URLs for security issues'
+        'POST /api/scan': 'Scan code, GitHub repositories, npm packages, OpenVSX extensions, GitHub Actions workflows, or supported skill-directory URLs for security issues'
       }
     }
   );

@@ -1,8 +1,8 @@
 # SkillScan
 
-Static security scanning for AI skills, MCP servers, npm packages, and VS Code extensions.
+Static security scanning for AI skills, MCP servers, npm packages, VS Code extensions, and GitHub Actions workflows.
 
-SkillScan checks local skill instructions, GitHub-hosted code, npm package metadata, OpenVSX extension metadata, and MCP server repositories for risky patterns before you install or run them. It is intentionally fast and boring: static analysis, clear findings, and remediation notes.
+SkillScan checks local skill instructions, GitHub-hosted code, npm package metadata, OpenVSX extension metadata, GitHub Actions workflows, and MCP server repositories for risky patterns before you install or run them. It is intentionally fast and boring: static analysis, clear findings, and remediation notes.
 
 ## The ClawdHub Supply Chain Crisis
 
@@ -28,8 +28,9 @@ His advice? "Read every file or feed files to AI to check safety." **We automate
 - MCP server and GitHub repository scanning.
 - npm package metadata and lifecycle-script scanning.
 - VS Code/OpenVSX extension manifest and source-behavior scanning.
+- GitHub Actions workflow scanning for release-pipeline and PR-trigger risks.
 - 0-100 security score with A-F grades.
-- Pattern checks for shell execution, network access, file-system access, prompt injection, credential patterns, data exfiltration, package install hooks, and extension activation behavior.
+- Pattern checks for shell execution, network access, file-system access, prompt injection, credential patterns, data exfiltration, package install hooks, extension activation behavior, and CI workflow trust boundaries.
 - No AI inference required for the core scan.
 - Explicit install verdicts: pass, manual review, or block install.
 - Committed malicious fixture corpus for token exfiltration, malicious install hooks, hostile skill instructions, and persistence attempts.
@@ -59,6 +60,11 @@ Based on real ClawdHub compromises and supply chain attacks:
 18. **Dependency Confusion Signals** - Suspicious dependency names and package-name lookalikes
 19. **VS Code Extension Activation** - Broad activation events such as `*`, startup, workspace, and language-wide activation
 20. **VS Code Extension Runtime Behavior** - Terminal execution, workspace file access, clipboard access, and secret exfiltration flows
+21. **Known Compromised Package Versions** - Incident-intelligence matches for public npm supply-chain compromises
+22. **Registry Freshness Cooldown** - Fresh package versions and high-impact packages less than 7 days old
+23. **Package Integrity Metadata** - Missing integrity hashes or weak registry metadata
+24. **GitHub Actions Trust Boundaries** - `pull_request_target`, checkout, write permissions, and secret access combinations
+25. **GitHub Actions Pinning** - Third-party actions referenced by mutable tags instead of full commit SHAs
 
 ## Evaluation Harness
 
@@ -72,6 +78,8 @@ Committed malicious fixtures live in `test/fixtures/malicious` and cover:
 - Persistence attempts through launch agents, SSH authorized keys, and broad file permission changes.
 - npm packages that exfiltrate environment variables during install.
 - VS Code extensions with broad activation, terminal execution, clipboard access, and outbound secret transmission.
+- Known-compromised npm package/version metadata.
+- GitHub Actions workflows with `pull_request_target`, write permissions, unpinned third-party actions, and npm publish secrets.
 
 Those fixtures must all produce `riskLevel: "block"`:
 
@@ -127,7 +135,7 @@ https://github.com/username/repo/blob/main/file.ts
 ```
 
 ### Scan Code Directly
-Paste skill instructions, package manifests, extension manifests, or source code directly into the scanner.
+Paste skill instructions, package manifests, extension manifests, GitHub Actions workflows, or source code directly into the scanner.
 
 ## Why SkillScan Exists
 
@@ -144,7 +152,7 @@ ClawdHub has **zero vetting**. Any skill can be published. The Nick Saraev video
 
 ### POST /api/scan
 
-Scan code, GitHub repositories, npm packages, OpenVSX extensions, or supported skill-directory URLs for security issues.
+Scan code, GitHub repositories, npm packages, OpenVSX extensions, GitHub Actions workflows, or supported skill-directory URLs for security issues.
 
 **Request Body:**
 ```json

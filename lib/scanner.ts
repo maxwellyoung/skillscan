@@ -2,7 +2,7 @@ import { Finding, ScanResult, GitHubFile } from './types';
 
 type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 
-const CHECKS_RUN = 20;
+const CHECKS_RUN = 25;
 const severityRank: Record<Severity, number> = {
   critical: 0,
   high: 1,
@@ -10,6 +10,30 @@ const severityRank: Record<Severity, number> = {
   low: 3,
   info: 4,
 };
+
+const KNOWN_COMPROMISED_NPM = new Map([
+  ['axios@0.30.4', 'Axios supply-chain compromise: malicious npm release published outside the normal GitHub release flow.'],
+  ['axios@1.14.1', 'Axios supply-chain compromise: malicious npm release published outside the normal GitHub release flow.'],
+  ['eslint-config-prettier@8.10.1', 'eslint-config-prettier maintainer account compromise: malicious npm release.'],
+  ['eslint-config-prettier@9.1.1', 'eslint-config-prettier maintainer account compromise: malicious npm release.'],
+  ['eslint-config-prettier@10.1.6', 'eslint-config-prettier maintainer account compromise: malicious npm release.'],
+  ['eslint-config-prettier@10.1.7', 'eslint-config-prettier maintainer account compromise: malicious npm release.'],
+  ['@bitwarden/cli@2026.4.0', 'Bitwarden CLI npm compromise window: malicious release distributed through npm.'],
+  ['intercom-client@7.0.4', 'Mini Shai-Hulud / TeamPCP campaign: compromised npm release.'],
+  ['intercom-client@7.0.5', 'Mini Shai-Hulud / TeamPCP campaign: compromised npm release.'],
+]);
+
+const HIGH_VALUE_PACKAGE_NAMES = new Set([
+  'axios',
+  'eslint',
+  'eslint-config-prettier',
+  '@bitwarden/cli',
+  '@tanstack/react-router',
+  '@tanstack/router-core',
+  'intercom-client',
+]);
+
+const SHA_PIN = /^[a-f0-9]{40}$/i;
 
 /**
  * SkillScan Security Scanner v2
@@ -200,6 +224,16 @@ export class SecurityScanner {
 
     // 14. VS Code extension source behavior
     this.checkVsCodeExtensionBehavior(content, file, lines);
+
+    // 15. GitHub Actions workflow behavior
+    if (this.isGitHubActionsWorkflow(file)) {
+      this.checkGitHubActionsWorkflow(content, file, lines);
+    }
+
+    // 16. Registry metadata intelligence
+    if (file.name === 'npm-metadata.json') {
+      this.checkNpmRegistryMetadata(content, file);
+    }
   }
 
   private checkExecCalls(content: string, file: GitHubFile, lines: string[]): void {
@@ -925,6 +959,184 @@ export class SecurityScanner {
     }
   }
 
+  private isGitHubActionsWorkflow(file: GitHubFile): boolean {
+    const normalizedPath = file.path.toLowerCase();
+    const normalizedName = file.name.toLowerCase();
+    return normalizedName.endsWith('.workflow.yml') ||
+      normalizedName.endsWith('.workflow.yaml') ||
+      normalizedPath.includes('.github/workflows/') &&
+        (normalizedPath.endsWith('.yml') || normalizedPath.endsWith('.yaml'));
+  }
+
+  private checkGitHubActionsWorkflow(content: string, file: GitHubFile, lines: string[]): void {
+    const hasPullRequestTarget = /\bpull_request_target\b/.test(content);
+    const hasWriteAll = /permissions\s*:\s*write-all/i.test(content);
+    const hasIdTokenWrite = /id-token\s*:\s*write/i.test(content);
+    const hasContentsWrite = /contents\s*:\s*write/i.test(content);
+    const hasSecrets = /\$\{\{\s*secrets\./i.test(content);
+    const hasCheckout = /uses\s*:\s*actions\/checkout@/i.test(content);
+    const hasPackagePublish = /\b(npm\s+publish|pnpm\s+publish|yarn\s+npm\s+publish|npm\s+run\s+release|semantic-release)\b/i.test(content);
+
+    if (hasPullRequestTarget) {
+      const lineNumber = this.findFirstMatchingLine(lines, /\bpull_request_target\b/);
+      const severity: Severity = hasSecrets || hasContentsWrite || hasWriteAll ? 'critical' : 'high';
+      this.addFinding({
+        severity,
+        category: 'GitHub Actions',
+        title: 'pull_request_target workflow detected',
+        description: 'pull_request_target can run with elevated repository context on code influenced by external pull requests.',
+        file: file.path,
+        line: lineNumber,
+        snippet: lines[lineNumber - 1]?.trim(),
+        remediation: 'Avoid pull_request_target unless the job never checks out or executes untrusted PR code. Prefer pull_request with read-only permissions.'
+      });
+    }
+
+    if (hasWriteAll || hasContentsWrite || hasIdTokenWrite) {
+      const lineNumber = this.findFirstMatchingLine(lines, /permissions\s*:\s*write-all|contents\s*:\s*write|id-token\s*:\s*write/i);
+      this.addFinding({
+        severity: hasPackagePublish || hasSecrets ? 'high' : 'medium',
+        category: 'GitHub Actions Permissions',
+        title: 'Broad write-capable workflow permissions detected',
+        description: 'Write permissions and OIDC tokens increase blast radius if the workflow or an action dependency is compromised.',
+        file: file.path,
+        line: lineNumber,
+        snippet: lines[lineNumber - 1]?.trim(),
+        remediation: 'Use least-privilege permissions at workflow and job scope. Grant write or id-token only to the exact publish job.'
+      });
+    }
+
+    if (hasPackagePublish && hasSecrets) {
+      const lineNumber = this.findFirstMatchingLine(lines, /npm\s+publish|pnpm\s+publish|yarn\s+npm\s+publish|semantic-release/i);
+      this.addFinding({
+        severity: 'high',
+        category: 'Release Pipeline',
+        title: 'Package publish workflow has secret access',
+        description: 'Recent supply-chain attacks turned package release pipelines into credential exfiltration and republishing paths.',
+        file: file.path,
+        line: lineNumber,
+        snippet: lines[lineNumber - 1]?.trim(),
+        remediation: 'Use trusted publishing with scoped OIDC, short-lived credentials, protected environments, and manual approval for high-impact packages.'
+      });
+    }
+
+    if (hasPullRequestTarget && hasCheckout) {
+      const lineNumber = this.findFirstMatchingLine(lines, /actions\/checkout@/i);
+      this.addFinding({
+        severity: 'critical',
+        category: 'GitHub Actions',
+        title: 'pull_request_target workflow checks out code',
+        description: 'Checking out code in a pull_request_target workflow is a common path to running untrusted code with elevated repository permissions.',
+        file: file.path,
+        line: lineNumber,
+        snippet: lines[lineNumber - 1]?.trim(),
+        remediation: 'Do not checkout or execute PR-controlled code in pull_request_target workflows.'
+      });
+    }
+
+    const usesPattern = /uses\s*:\s*([^@\s]+)@([^\s#]+)/gi;
+    for (const match of Array.from(content.matchAll(usesPattern))) {
+      const action = match[1];
+      const ref = match[2].replace(/^['"]|['"]$/g, '');
+      const isDockerAction = action.startsWith('docker://');
+      const isLocalAction = action.startsWith('./');
+      const isThirdParty = !isDockerAction && !isLocalAction && !action.startsWith('actions/');
+      const isPinned = SHA_PIN.test(ref);
+
+      if (isThirdParty && !isPinned) {
+        const lineNumber = this.getLineNumber(content, match.index!);
+        this.addFinding({
+          severity: hasPackagePublish || hasSecrets ? 'high' : 'medium',
+          category: 'GitHub Actions Pinning',
+          title: 'Third-party action is not pinned to a commit SHA',
+          description: 'Tag-based action references can move after review, as seen in recent GitHub Actions supply-chain incidents.',
+          file: file.path,
+          line: lineNumber,
+          snippet: lines[lineNumber - 1]?.trim(),
+          remediation: 'Pin third-party actions to a full commit SHA and update them through reviewable dependency automation.'
+        });
+      }
+    }
+  }
+
+  private checkNpmRegistryMetadata(content: string, file: GitHubFile): void {
+    try {
+      const metadata = JSON.parse(content) as {
+        name?: string;
+        version?: string;
+        time?: Record<string, string>;
+        dist?: { integrity?: string; shasum?: string; tarball?: string };
+        maintainers?: Array<{ name?: string; email?: string }>;
+      };
+
+      const name = metadata.name || this.extractPackageNameFromPath(file.path);
+      const version = metadata.version || this.extractPackageVersionFromPath(file.path);
+      const packageVersion = name && version ? `${name}@${version}` : '';
+
+      if (packageVersion && KNOWN_COMPROMISED_NPM.has(packageVersion)) {
+        this.addFinding({
+          severity: 'critical',
+          category: 'Known Compromised Package',
+          title: 'Package version is listed in incident intelligence',
+          description: KNOWN_COMPROMISED_NPM.get(packageVersion) || 'This package version has been associated with a public supply-chain incident.',
+          file: file.path,
+          snippet: packageVersion,
+          remediation: 'Do not install this version. Pin to a known safe version, remove it from lockfiles, and rotate secrets on any machine or runner that installed it.'
+        });
+      }
+
+      const publishedAt = version ? metadata.time?.[version] : undefined;
+      if (publishedAt) {
+        const ageHours = (Date.now() - Date.parse(publishedAt)) / 36e5;
+        if (Number.isFinite(ageHours) && ageHours >= 0) {
+          const isHighValue = name ? HIGH_VALUE_PACKAGE_NAMES.has(name) || name.startsWith('@tanstack/') : false;
+          if (ageHours < 24 || isHighValue && ageHours < 168) {
+            this.addFinding({
+              severity: ageHours < 24 ? 'high' : 'medium',
+              category: 'Registry Freshness',
+              title: ageHours < 24 ? 'Package version published in the last 24 hours' : 'High-impact package version is less than 7 days old',
+              description: 'Recent incidents show malicious versions can be detected and removed within hours, after they have already reached automated installs.',
+              file: file.path,
+              snippet: `${packageVersion || 'package'} published ${publishedAt}`,
+              remediation: 'Apply a cooldown before auto-installing fresh versions, especially for high-download packages or release/publish tooling.'
+            });
+          }
+        }
+      }
+
+      if (metadata.dist && !metadata.dist.integrity) {
+        this.addFinding({
+          severity: 'medium',
+          category: 'Package Integrity',
+          title: 'Registry metadata is missing Subresource Integrity',
+          description: 'Integrity metadata helps package managers verify downloaded artifacts.',
+          file: file.path,
+          remediation: 'Prefer packages with integrity metadata and lockfiles that preserve tarball hashes.'
+        });
+      }
+
+      if (!metadata.maintainers || metadata.maintainers.length === 0) {
+        this.addFinding({
+          severity: 'medium',
+          category: 'Package Maintainers',
+          title: 'Package metadata has no maintainers',
+          description: 'Missing maintainer metadata weakens provenance review and incident response.',
+          file: file.path,
+          remediation: 'Review package ownership and release history before installing.'
+        });
+      }
+    } catch {
+      this.addFinding({
+        severity: 'low',
+        category: 'Registry Metadata',
+        title: 'Invalid npm registry metadata',
+        description: 'npm metadata could not be parsed.',
+        file: file.path,
+        remediation: 'Retry the scan or inspect the registry response manually.'
+      });
+    }
+  }
+
   private getLineNumber(content: string, index: number): number {
     return content.substring(0, index).split('\n').length;
   }
@@ -950,6 +1162,16 @@ export class SecurityScanner {
   private isSensitiveEnvVar(envVar: string): boolean {
     const sensitivePatterns = ['KEY', 'TOKEN', 'SECRET', 'PASSWORD', 'AUTH', 'PRIVATE'];
     return sensitivePatterns.some(pattern => envVar.toUpperCase().includes(pattern));
+  }
+
+  private extractPackageNameFromPath(pathValue: string): string | undefined {
+    const match = pathValue.match(/^npm:(.+)@([^@/]+)\/npm-metadata\.json$/);
+    return match?.[1];
+  }
+
+  private extractPackageVersionFromPath(pathValue: string): string | undefined {
+    const match = pathValue.match(/^npm:(.+)@([^@/]+)\/npm-metadata\.json$/);
+    return match?.[2];
   }
 
   private looksLikeTyposquat(packageName: string, dependencyName: string): boolean {

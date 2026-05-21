@@ -7,7 +7,11 @@ const FIXTURE_DIR = path.join(process.cwd(), 'test/fixtures/malicious');
 
 function toGitHubFile(name: string, content: string): GitHubFile {
   const base = path.basename(name);
-  const scannerName = base.endsWith('.package.json') ? 'package.json' : base;
+  const scannerName = base.endsWith('.package.json')
+    ? 'package.json'
+    : base.endsWith('.npm-metadata.json')
+      ? 'npm-metadata.json'
+      : base;
 
   return {
     name: scannerName,

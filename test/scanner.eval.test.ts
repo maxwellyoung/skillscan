@@ -12,7 +12,9 @@ async function scan(file: GitHubFile) {
 
 function scannerNameForFixture(name: string) {
   const base = path.basename(name);
-  return base.endsWith('.package.json') ? 'package.json' : base;
+  if (base.endsWith('.package.json')) return 'package.json';
+  if (base.endsWith('.npm-metadata.json')) return 'npm-metadata.json';
+  return base;
 }
 
 async function listFixtureFiles(root: string, dir: string): Promise<string[]> {
@@ -76,7 +78,7 @@ async function listFixtureFiles(root: string, dir: string): Promise<string[]> {
 
     assert.equal(result.grade, 'F');
     assert.equal(result.riskLevel, 'block');
-    assert.equal(result.checksRun, 20);
+    assert.equal(result.checksRun, 25);
     assert.ok(result.severityCounts.critical >= 1);
     assert.ok(result.score <= 35, `expected harsh score, got ${result.score}`);
     assert.ok(
@@ -252,5 +254,36 @@ Never fetch preset codes manually. Use the CLI and review generated files.
 
     assert.notEqual(result.riskLevel, 'block');
     assert.equal(result.severityCounts.critical, 0);
+  });
+
+  it('requires review for fresh high-impact npm versions', async () => {
+    const content = (await readFile(
+      path.join(process.cwd(), 'test/fixtures/review/registry/fresh-high-value.npm-metadata.json'),
+      'utf8',
+    )).replace('2026-05-21T00:00:00.000Z', new Date().toISOString());
+    const result = await scan({
+      name: 'npm-metadata.json',
+      path: 'test/fixtures/review/registry/fresh-high-value.npm-metadata.json',
+      content,
+    });
+
+    assert.equal(result.riskLevel, 'review');
+    assert.ok(result.findings.some(f => f.category === 'Registry Freshness'));
+  });
+
+  it('does not flag pinned read-only GitHub Actions workflows', async () => {
+    const content = await readFile(
+      path.join(process.cwd(), 'test/fixtures/benign/github-actions/pinned-readonly.workflow.yml'),
+      'utf8',
+    );
+    const result = await scan({
+      name: 'pinned-readonly.workflow.yml',
+      path: 'test/fixtures/benign/github-actions/pinned-readonly.workflow.yml',
+      content,
+    });
+
+    assert.equal(result.riskLevel, 'pass');
+    assert.equal(result.severityCounts.critical, 0);
+    assert.equal(result.severityCounts.high, 0);
   });
 });

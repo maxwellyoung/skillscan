@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence, useSpring } from 'framer-motion';
 import { ScanResult, Finding } from '@/lib/types';
-import Link from 'next/link';
 
 // Spring presets — physics-first
 const spring = {
@@ -106,9 +105,6 @@ export default function Home() {
       <nav className="px-6 py-5 flex items-center justify-between">
         <span className="text-[15px] font-medium tracking-[-0.01em]">SkillScan</span>
         <div className="flex items-center gap-5 text-[13px] text-white/50">
-          <Link href="/pricing" className="hover:text-white/70 transition-colors duration-200">
-            Pricing
-          </Link>
           <a
             href="https://github.com/maxwellyoung/skillscan"
             target="_blank"

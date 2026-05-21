@@ -1,10 +1,13 @@
 export interface ScanResult {
   score: number; // 0-100 (100 = safe)
   grade: 'A' | 'B' | 'C' | 'D' | 'F';
+  riskLevel: 'pass' | 'review' | 'block';
+  severityCounts: Record<Finding['severity'], number>;
   findings: Finding[];
   summary: string;
   scannedFiles: number;
   linesAnalyzed: number;
+  checksRun: number;
 }
 
 export interface Finding {

@@ -15,7 +15,7 @@ const tiers = [
     description: 'For individual developers scanning open-source skills.',
     features: [
       'Unlimited web scans',
-      '13 security checks',
+      '16 deterministic checks',
       'GitHub & ClawdHub support',
       'Instant results',
       'API access (100 req/day)',

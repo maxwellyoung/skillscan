@@ -2,8 +2,9 @@ import { GitHubFile } from './types';
 
 export class GitHubFetcher {
   private static readonly MAX_FILES = 50;
-  private static readonly SUPPORTED_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.sh', '.py', '.rb', '.go', '.rs', '.json'];
-  private static readonly IMPORTANT_FILES = ['SKILL.md', 'package.json', 'README.md'];
+  private static readonly MAX_FILE_BYTES = 250_000;
+  private static readonly SUPPORTED_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.sh', '.py', '.rb', '.go', '.rs', '.json', '.yaml', '.yml', '.toml', '.env'];
+  private static readonly IMPORTANT_FILES = ['SKILL.md', 'AGENTS.md', 'CLAUDE.md', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lockb', 'README.md'];
 
   /**
    * Convert ClawdHub/Molthub skill URLs to their GitHub source.
@@ -118,13 +119,19 @@ export class GitHubFetcher {
       headers['Authorization'] = `Bearer ${ghToken}`;
     }
 
-    const response = await fetch(rawUrl, { headers });
+      const response = await fetch(rawUrl, { headers });
 
     if (!response.ok) {
       throw new Error(`Failed to fetch file: ${response.statusText}`);
     }
 
-    return await response.text();
+    const contentLength = response.headers.get('content-length');
+    if (contentLength && Number(contentLength) > this.MAX_FILE_BYTES) {
+      throw new Error('File is too large to scan safely');
+    }
+
+    const text = await response.text();
+    return text.length > this.MAX_FILE_BYTES ? text.slice(0, this.MAX_FILE_BYTES) : text;
   }
 
   private static async fetchRawFile(owner: string, repo: string, filename: string, branch: string = 'main'): Promise<string | null> {
@@ -192,7 +199,7 @@ export class GitHubFetcher {
           visited.add(item.path);
 
           if (item.type === 'file') {
-            const shouldInclude = GitHubFetcher.SUPPORTED_EXTENSIONS.some(ext => 
+            const shouldInclude = GitHubFetcher.SUPPORTED_EXTENSIONS.some(ext =>
               item.name.endsWith(ext)
             ) || GitHubFetcher.IMPORTANT_FILES.includes(item.name);
 

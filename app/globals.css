@@ -48,26 +48,6 @@ textarea:focus {
   text-align: right;
 }
 
-/* Scanning line */
-@keyframes scan-sweep {
-  0% { transform: translateX(-100%); opacity: 0; }
-  10% { opacity: 1; }
-  90% { opacity: 1; }
-  100% { transform: translateX(400%); opacity: 0; }
-}
-
-.scanning::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  width: 2px;
-  height: 100%;
-  background: hsl(355, 78%, 58%);
-  box-shadow: 0 0 12px hsl(355, 78%, 58%, 0.4);
-  animation: scan-sweep 2s ease-in-out infinite;
-  pointer-events: none;
-}
-
 /* Score glow — Muriel Cooper depth */
 .score-glow {
   text-shadow:

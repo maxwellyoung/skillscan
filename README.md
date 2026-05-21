@@ -29,8 +29,10 @@ His advice? "Read every file or feed files to AI to check safety." **We automate
 - 0-100 security score with A-F grades.
 - Pattern checks for shell execution, network access, file-system access, prompt injection, credential patterns, and data exfiltration.
 - No AI inference required for the core scan.
+- Explicit install verdicts: pass, manual review, or block install.
+- Adversarial evals for token exfiltration, malicious install hooks, hostile skill instructions, and benign documentation false positives.
 
-## 13 Security Checks
+## Security Checks
 
 Based on real ClawdHub compromises and supply chain attacks:
 
@@ -46,7 +48,34 @@ Based on real ClawdHub compromises and supply chain attacks:
 10. **Credential Patterns** - Hardcoded API keys, passwords, tokens
 11. **Data Exfiltration Webhooks** - Webhook URLs for stealing data ⭐ NEW
 12. **Package Analysis** - Typosquatting, malicious packages in package.json
-13. **Excessive Permissions** - Skills requesting too many tool accesses
+13. **Secret Exfiltration Flow** - Cross-line detection when sensitive env vars and outbound transmission appear together
+14. **Persistence & System Modification** - Startup jobs, SSH access files, curl-pipe-shell, destructive deletes, broad chmod/chown
+15. **Malicious Skill Instructions** - Instruction files combining broad tool access, secrets, outbound transmission, or override language
+16. **Dangerous Lifecycle Scripts** - Critical scoring for install hooks that run network, shell, secret, or filesystem-modifying behavior
+
+## Evaluation Harness
+
+The scanner has adversarial evals for cases that should fail hard and benign cases that should stay quiet:
+
+- Multi-line secret exfiltration through outbound requests.
+- `postinstall` scripts that fetch and execute remote code.
+- `SKILL.md` instructions that request broad tools, secrets, and webhook transmission.
+- Security documentation that mentions tokens without being treated as executable theft.
+- Local app code using `NEXT_PUBLIC_*` env vars and relative API routes.
+
+Run them with:
+
+```bash
+pnpm test
+```
+
+For a local false-positive corpus, scan the installed Codex/agents/plugin skills:
+
+```bash
+pnpm eval:local-skills
+```
+
+That command summarizes findings with home paths redacted and exits nonzero if any critical or high-risk finding appears.
 
 ## Usage
 
@@ -136,6 +165,8 @@ pnpm build
 
 ### Quality Checks
 ```bash
+pnpm test
+pnpm eval:local-skills
 pnpm lint
 pnpm build
 ```

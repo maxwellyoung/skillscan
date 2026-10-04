@@ -10,8 +10,15 @@ SkillScan is a fast, free security scanner for ClawdHub skills, Claude Code skil
 pnpm dev              # Start development server (Next.js)
 pnpm build            # Build for production
 pnpm start            # Start production server
-pnpm lint             # ESLint code checking
+pnpm lint             # ESLint code checking (app, lib, cli, test, scripts)
+pnpm test             # Node test runner (scanner evals + CLI/SARIF tests)
+pnpm skillscan <path> # Run the CLI from source (see cli/)
+pnpm build:cli        # Compile the CLI to dist/ (bin: dist/cli/skillscan.js)
 ```
+
+The CLI (`cli/`), the GitHub Action (`action.yml`), and `app/api/scan/route.ts` share
+`lib/scanner.ts`, `lib/targets.ts` (remote URL resolution), and `lib/files.ts`
+(file-selection rules). Do not duplicate scan or fetch logic in the CLI.
 
 ## Architecture
 

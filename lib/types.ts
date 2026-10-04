@@ -8,7 +8,7 @@ export interface ScanResult {
   scannedFiles: number;
   linesAnalyzed: number;
   checksRun: number;
-  sourceType?: 'code' | 'github' | 'npm' | 'openvsx';
+  sourceType?: 'code' | 'github' | 'npm' | 'openvsx' | 'local';
   fetchedAt?: string;
   partial?: boolean;
   scanWarnings?: string[];
@@ -20,6 +20,8 @@ export interface Finding {
   title: string;
   description: string;
   file?: string;
+  /** Full path of the scanned file (repo-relative, registry-prefixed, or local-relative). */
+  path?: string;
   line?: number;
   snippet?: string;
   remediation?: string;

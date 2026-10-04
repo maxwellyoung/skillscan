@@ -2,14 +2,32 @@
   "name": "skillscan",
   "version": "0.1.0",
   "private": true,
+  "description": "Static, zero-AI security scanner for Claude Code skills, MCP servers, npm packages, VS Code extensions, and GitHub Actions workflows.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maxwellyoung/skillscan.git"
+  },
+  "bin": {
+    "skillscan": "dist/cli/skillscan.js"
+  },
+  "files": [
+    "dist/cli",
+    "dist/lib"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:cli": "tsc -p tsconfig.cli.json",
     "start": "next start",
+    "skillscan": "tsx cli/skillscan.ts",
     "test": "node --import tsx --test test/**/*.test.ts",
     "eval:malicious": "tsx scripts/eval-malicious-fixtures.ts",
     "eval:local-skills": "tsx scripts/eval-local-skills.ts",
-    "lint": "next lint",
+    "lint": "next lint --dir app --dir lib --dir cli --dir test --dir scripts",
     "fallow": "npx --yes fallow",
     "fallow:dead-code": "npx --yes fallow dead-code",
     "fallow:dupes": "npx --yes fallow dupes",

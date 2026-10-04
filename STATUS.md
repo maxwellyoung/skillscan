@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-04
+Last updated: 2026-10-05
 Status: Active
 Lifecycle: product-hardening
 
@@ -18,5 +18,5 @@ Lifecycle: product-hardening
 
 ## Next Useful Move
 
-- Publish the CLI to npm: the unscoped `skillscan` name is owned by another maintainer (dejimarquis/SkillScan), so pick a scoped name (e.g. `@maxwellyoung/skillscan`) keeping the `skillscan` bin; remove `private`, add a LICENSE file, then switch the action from `npx tsx` to the published package.
+- Publish `packages/cli` to npm as `@maxwellyoung/skillscan` (bin `skillscan`; the unscoped name belongs to dejimarquis/SkillScan). Packaging, LICENSE, and the action's `cli-source: npm` path are ready; after publishing, flip the action's `cli-source` default to `npm` and drop the "not yet published" notes in README.md.
 - Expand the eval corpus with real malicious repositories; malicious-fixture regressions now run in CI.

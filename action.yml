@@ -30,6 +30,14 @@ inputs:
     description: 'Node.js version used to run the scanner.'
     required: false
     default: '22'
+  cli-source:
+    description: 'Where the scanner comes from: "source" runs the TypeScript CLI from this action checkout with tsx; "npm" runs the published @maxwellyoung/skillscan package at cli-version. Defaults to "source" until the package is published.'
+    required: false
+    default: 'source'
+  cli-version:
+    description: 'Exact @maxwellyoung/skillscan version used when cli-source is "npm".'
+    required: false
+    default: '0.1.0'
 
 outputs:
   exit-code:
@@ -54,12 +62,27 @@ runs:
         SKILLSCAN_TARGET: ${{ inputs.path }}
         SKILLSCAN_FAIL_ON: ${{ inputs.fail-on }}
         SKILLSCAN_SARIF: ${{ inputs.sarif-file }}
+        SKILLSCAN_CLI_SOURCE: ${{ inputs.cli-source }}
+        SKILLSCAN_CLI_VERSION: ${{ inputs.cli-version }}
       run: |
         set +e
-        # tsx runs the TypeScript CLI straight from the action checkout; no build step needed.
-        npx --yes tsx@4.22.3 "$GITHUB_ACTION_PATH/cli/skillscan.ts" "$SKILLSCAN_TARGET" \
-          --sarif --output "$SKILLSCAN_SARIF" --fail-on "$SKILLSCAN_FAIL_ON"
-        code=$?
+        args=("$SKILLSCAN_TARGET" --sarif --output "$SKILLSCAN_SARIF" --fail-on "$SKILLSCAN_FAIL_ON")
+        case "$SKILLSCAN_CLI_SOURCE" in
+          npm)
+            # The published package is a single bundled file with no dependencies.
+            npx --yes --package "@maxwellyoung/skillscan@$SKILLSCAN_CLI_VERSION" -- skillscan "${args[@]}"
+            code=$?
+            ;;
+          source)
+            # tsx runs the TypeScript CLI straight from the action checkout; no build step needed.
+            npx --yes tsx@4.22.3 "$GITHUB_ACTION_PATH/cli/skillscan.ts" "${args[@]}"
+            code=$?
+            ;;
+          *)
+            echo "::error title=SkillScan::cli-source must be 'source' or 'npm', got '$SKILLSCAN_CLI_SOURCE'."
+            code=2
+            ;;
+        esac
         echo "exit-code=$code" >> "$GITHUB_OUTPUT"
         exit 0
 

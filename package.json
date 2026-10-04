@@ -8,20 +8,10 @@
     "type": "git",
     "url": "git+https://github.com/maxwellyoung/skillscan.git"
   },
-  "bin": {
-    "skillscan": "dist/cli/skillscan.js"
-  },
-  "files": [
-    "dist/cli",
-    "dist/lib"
-  ],
-  "engines": {
-    "node": ">=20"
-  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "build:cli": "tsc -p tsconfig.cli.json",
+    "build:cli": "node scripts/build-cli.mjs",
     "start": "next start",
     "skillscan": "tsx cli/skillscan.ts",
     "test": "node --import tsx --test test/**/*.test.ts",
@@ -46,6 +36,7 @@
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
+    "esbuild": "0.28.0",
     "eslint": "^8",
     "eslint-config-next": "14.2.35",
     "postcss": "^8",

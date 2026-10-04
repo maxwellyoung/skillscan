@@ -119,8 +119,8 @@ describe('CLI argument parsing', () => {
     assert.throws(() => parseCliArgs(['.', '--unknown']), UsageError);
   });
 
-  it('reports the package.json version', async () => {
-    const pkg = JSON.parse(await readFile(path.join(process.cwd(), 'package.json'), 'utf8'));
+  it('reports the published package version', async () => {
+    const pkg = JSON.parse(await readFile(path.join(process.cwd(), 'packages/cli/package.json'), 'utf8'));
     assert.equal(SKILLSCAN_VERSION, pkg.version);
     const { code, stdout } = await runCli('--version');
     assert.equal(code, EXIT_OK);

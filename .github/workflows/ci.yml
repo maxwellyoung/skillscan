@@ -26,6 +26,12 @@ jobs:
       - run: pnpm test
       - run: pnpm eval:malicious
       - run: pnpm build:cli
+      - name: Smoke-test the bundled CLI and its npm tarball
+        run: |
+          node packages/cli/dist/cli.js test/fixtures/benign
+          set +e; node packages/cli/dist/cli.js test/fixtures/malicious; code=$?; set -e
+          test "$code" = "1"
+          cd packages/cli && npm pack --dry-run
       - run: pnpm build
 
   # Dogfood the composite action from this checkout. Benign fixtures must pass;

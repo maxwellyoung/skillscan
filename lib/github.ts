@@ -1,10 +1,10 @@
 import { GitHubFile } from './types';
+import { IMPORTANT_FILES, MAX_FILE_BYTES, shouldScanFile, shouldSkipDirectory } from './files';
 
 export class GitHubFetcher {
   private static readonly MAX_FILES = 50;
-  private static readonly MAX_FILE_BYTES = 250_000;
-  private static readonly SUPPORTED_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.sh', '.py', '.rb', '.go', '.rs', '.json', '.yaml', '.yml', '.toml', '.env'];
-  private static readonly IMPORTANT_FILES = ['SKILL.md', 'AGENTS.md', 'CLAUDE.md', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lockb', 'README.md'];
+  private static readonly MAX_FILE_BYTES = MAX_FILE_BYTES;
+  private static readonly IMPORTANT_FILES = IMPORTANT_FILES;
 
   /**
    * Convert ClawdHub/Molthub skill URLs to their GitHub source.
@@ -51,7 +51,7 @@ export class GitHubFetcher {
         }
       } catch {
         // File doesn't exist, continue
-        console.log(`File ${filename} not found, skipping`);
+        console.warn(`File ${filename} not found, skipping`);
       }
     }
 
@@ -199,9 +199,7 @@ export class GitHubFetcher {
           visited.add(item.path);
 
           if (item.type === 'file') {
-            const shouldInclude = GitHubFetcher.SUPPORTED_EXTENSIONS.some(ext =>
-              item.name.endsWith(ext)
-            ) || GitHubFetcher.IMPORTANT_FILES.includes(item.name);
+            const shouldInclude = shouldScanFile(item.name);
 
             if (shouldInclude && item.download_url) {
               try {
@@ -215,7 +213,7 @@ export class GitHubFetcher {
                 console.error(`Failed to fetch ${item.path}:`, error);
               }
             }
-          } else if (item.type === 'dir' && !item.path.includes('node_modules') && !item.path.includes('.git')) {
+          } else if (item.type === 'dir' && !shouldSkipDirectory(item.path)) {
             await fetchDirectory(item.path);
           }
         }

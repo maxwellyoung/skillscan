@@ -3,3 +3,5 @@ node_modules
 .env*
 .vercel
 tsconfig.tsbuildinfo
+dist
+packages/cli/LICENSE

@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-05-21
+Last updated: 2026-10-05
 Status: Active
 Lifecycle: product-hardening
 
@@ -8,11 +8,15 @@ Lifecycle: product-hardening
 
 - Skill/security scanning tool is being hardened as a public developer-security product.
 - Scanner now includes harsher scoring, cross-line secret exfiltration detection, lifecycle-script analysis, hostile skill-instruction checks, persistence/system-modification detection, adversarial evals, and a local installed-skills false-positive corpus.
+- `skillscan` CLI (local paths plus GitHub/ClawdHub/npm/OpenVSX targets) with text, `--json`, and SARIF 2.1.0 output, `--fail-on`, and 0/1/2 exit codes. Shares `lib/scanner.ts`, `lib/targets.ts`, and `lib/files.ts` with the API route.
+- Composite GitHub Action (`action.yml`) runs the CLI and optionally uploads SARIF to code scanning. CI now runs typecheck, tests, the malicious-fixture eval, and dogfoods the action.
+- GitHub repo scans now include `.github/workflows` (a substring `.git` check previously skipped it).
 
 ## Revive When
 
-- Add richer evidence extraction, SARIF/JSON exports, package manifest heuristics, and CI/CLI workflows.
+- Add richer evidence extraction and package manifest heuristics.
 
 ## Next Useful Move
 
-- Expand the eval corpus with real malicious repositories and wire score regressions into CI.
+- Publish `packages/cli` to npm as `@maxwellyoung/skillscan` (bin `skillscan`; the unscoped name belongs to dejimarquis/SkillScan). Packaging, LICENSE, and the action's `cli-source: npm` path are ready; after publishing, flip the action's `cli-source` default to `npm` and drop the "not yet published" notes in README.md.
+- Expand the eval corpus with real malicious repositories; malicious-fixture regressions now run in CI.

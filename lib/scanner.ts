@@ -46,6 +46,7 @@ export class SecurityScanner {
   private scannedFiles = 0;
   private linesAnalyzed = 0;
   private seenFindings = new Set<string>();
+  private currentFile?: GitHubFile;
 
   async scan(files: GitHubFile[]): Promise<ScanResult> {
     this.findings = [];
@@ -55,8 +56,10 @@ export class SecurityScanner {
 
     for (const file of files) {
       this.linesAnalyzed += file.content.split('\n').length;
+      this.currentFile = file;
       await this.scanFile(file);
     }
+    this.currentFile = undefined;
 
     const score = this.calculateScore();
     const grade = this.calculateGrade(score);
@@ -121,7 +124,8 @@ export class SecurityScanner {
    * Deduplicate findings: same file + line + category = skip.
    */
   private addFinding(finding: Finding): void {
-    const key = `${finding.file}:${finding.line || 0}:${finding.category}`;
+    finding.path ??= this.currentFile?.path;
+    const key = `${finding.path ?? finding.file}:${finding.line || 0}:${finding.category}`;
     if (this.seenFindings.has(key)) return;
     this.seenFindings.add(key);
     this.findings.push(finding);

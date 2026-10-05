@@ -1,0 +1,107 @@
+name: 'SkillScan'
+description: 'Static, zero-AI security scan for Claude Code skills, MCP servers, npm packages, VS Code extensions, and GitHub Actions workflows.'
+author: 'Maxwell Young'
+branding:
+  icon: 'shield'
+  color: 'red'
+
+inputs:
+  path:
+    description: 'Local path or supported URL to scan (GitHub, ClawdHub/Molthub, npm, OpenVSX).'
+    required: false
+    default: '.'
+  fail-on:
+    description: 'Fail when any finding is at or above this severity: critical (same as "block install"), high, medium, low, info, or none.'
+    required: false
+    default: 'critical'
+  sarif-file:
+    description: 'Where to write the SARIF 2.1.0 report.'
+    required: false
+    default: 'skillscan.sarif'
+  upload-sarif:
+    description: 'Upload the SARIF report to GitHub code scanning. Requires `security-events: write` and code scanning to be available on the repository.'
+    required: false
+    default: 'false'
+  category:
+    description: 'Code scanning category used when uploading SARIF.'
+    required: false
+    default: 'skillscan'
+  node-version:
+    description: 'Node.js version used to run the scanner.'
+    required: false
+    default: '22'
+  cli-source:
+    description: 'Where the scanner comes from: "source" runs the TypeScript CLI from this action checkout with tsx; "npm" runs the published @maxwellyoung/skillscan package at cli-version. Defaults to "source" until the package is published.'
+    required: false
+    default: 'source'
+  cli-version:
+    description: 'Exact @maxwellyoung/skillscan version used when cli-source is "npm".'
+    required: false
+    default: '0.1.0'
+
+outputs:
+  exit-code:
+    description: '0 = nothing at or above fail-on, 1 = findings at or above fail-on, 2 = usage or runtime error.'
+    value: ${{ steps.scan.outputs.exit-code }}
+  sarif-file:
+    description: 'Path to the SARIF report.'
+    value: ${{ inputs.sarif-file }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Run SkillScan
+      id: scan
+      shell: bash
+      env:
+        SKILLSCAN_TARGET: ${{ inputs.path }}
+        SKILLSCAN_FAIL_ON: ${{ inputs.fail-on }}
+        SKILLSCAN_SARIF: ${{ inputs.sarif-file }}
+        SKILLSCAN_CLI_SOURCE: ${{ inputs.cli-source }}
+        SKILLSCAN_CLI_VERSION: ${{ inputs.cli-version }}
+      run: |
+        set +e
+        args=("$SKILLSCAN_TARGET" --sarif --output "$SKILLSCAN_SARIF" --fail-on "$SKILLSCAN_FAIL_ON")
+        case "$SKILLSCAN_CLI_SOURCE" in
+          npm)
+            # The published package is a single bundled file with no dependencies.
+            npx --yes --package "@maxwellyoung/skillscan@$SKILLSCAN_CLI_VERSION" -- skillscan "${args[@]}"
+            code=$?
+            ;;
+          source)
+            # tsx runs the TypeScript CLI straight from the action checkout; no build step needed.
+            npx --yes tsx@4.22.3 "$GITHUB_ACTION_PATH/cli/skillscan.ts" "${args[@]}"
+            code=$?
+            ;;
+          *)
+            echo "::error title=SkillScan::cli-source must be 'source' or 'npm', got '$SKILLSCAN_CLI_SOURCE'."
+            code=2
+            ;;
+        esac
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        exit 0
+
+    - name: Upload SARIF to code scanning
+      if: ${{ inputs.upload-sarif == 'true' && steps.scan.outputs.exit-code != '2' }}
+      uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+      with:
+        sarif_file: ${{ inputs.sarif-file }}
+        category: ${{ inputs.category }}
+
+    - name: Apply fail-on result
+      shell: bash
+      env:
+        SKILLSCAN_EXIT: ${{ steps.scan.outputs.exit-code }}
+        SKILLSCAN_FAIL_ON: ${{ inputs.fail-on }}
+      run: |
+        if [ "$SKILLSCAN_EXIT" = "1" ]; then
+          echo "::error title=SkillScan::Findings at or above '$SKILLSCAN_FAIL_ON' severity. See the report above or the SARIF file."
+        elif [ "$SKILLSCAN_EXIT" != "0" ]; then
+          echo "::error title=SkillScan::Scan could not run (exit $SKILLSCAN_EXIT)."
+        fi
+        exit "$SKILLSCAN_EXIT"

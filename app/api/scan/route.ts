@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { GitHubFetcher } from '@/lib/github';
-import { RegistryFetcher } from '@/lib/registry';
+import { fetchRemoteTarget, TargetError } from '@/lib/targets';
 import { SecurityScanner } from '@/lib/scanner';
 import { ScanRequest, GitHubFile } from '@/lib/types';
 import type { ScanResult } from '@/lib/types';
@@ -62,73 +61,18 @@ export async function POST(request: NextRequest) {
     let files: GitHubFile[] = [];
 
     if (url) {
-      // Handle GitHub and ClawdHub URLs
-      if (url.includes('github.com') ||
-          url.includes('githubusercontent.com') ||
-          url.includes('claudhub.ai') ||
-          url.includes('clawdhub.ai') ||
-          url.includes('molthub.ai')) {
-        try {
-          if (url.includes('/blob/') || url.includes('raw.githubusercontent.com')) {
-            // Single file URL
-            const file = await GitHubFetcher.fetchSingleFile(url);
-            files = [file];
-          } else {
-            // Repository URL (including ClawdHub)
-            files = await GitHubFetcher.fetchRepo(url);
-          }
-          sourceType = 'github';
-          fetchedAt = new Date().toISOString();
-        } catch (error) {
-          console.error('Fetch error:', error);
-          
-          if (url.includes('claudhub.ai') || url.includes('clawdhub.ai') || url.includes('molthub.ai')) {
-            return NextResponse.json(
-              { error: 'Failed to fetch from the skill directory. The skill may not exist or the GitHub repository is private/deleted.' },
-              { status: 400 }
-            );
-          } else {
-            return NextResponse.json(
-              { error: 'Failed to fetch from GitHub. Please check the URL and try again.' },
-              { status: 400 }
-            );
-          }
+      try {
+        const bundle = await fetchRemoteTarget(url);
+        files = bundle.files;
+        sourceType = bundle.sourceType;
+        fetchedAt = bundle.fetchedAt;
+        partial = bundle.partial;
+        scanWarnings = bundle.warnings;
+      } catch (error) {
+        if (error instanceof TargetError) {
+          return NextResponse.json({ error: error.message }, { status: 400 });
         }
-      } else if (RegistryFetcher.isNpmUrl(url)) {
-        try {
-          const bundle = await RegistryFetcher.fetchNpm(url);
-          files = bundle.files;
-          sourceType = bundle.sourceType;
-          fetchedAt = bundle.fetchedAt;
-          partial = bundle.partial;
-          scanWarnings = bundle.warnings;
-        } catch (error) {
-          console.error('npm fetch error:', error);
-          return NextResponse.json(
-            { error: 'Failed to fetch npm package metadata. Check the package URL or version.' },
-            { status: 400 }
-          );
-        }
-      } else if (RegistryFetcher.isOpenVsxUrl(url)) {
-        try {
-          const bundle = await RegistryFetcher.fetchOpenVsx(url);
-          files = bundle.files;
-          sourceType = bundle.sourceType;
-          fetchedAt = bundle.fetchedAt;
-          partial = bundle.partial;
-          scanWarnings = bundle.warnings;
-        } catch (error) {
-          console.error('OpenVSX fetch error:', error);
-          return NextResponse.json(
-            { error: 'Failed to fetch OpenVSX extension metadata. Check the extension URL.' },
-            { status: 400 }
-          );
-        }
-      } else {
-        return NextResponse.json(
-          { error: 'GitHub, ClawdHub, npm, and OpenVSX URLs are supported' },
-          { status: 400 }
-        );
+        throw error;
       }
     }
 

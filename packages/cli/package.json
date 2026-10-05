@@ -1,0 +1,40 @@
+{
+  "name": "@maxwellyoung/skillscan",
+  "version": "0.1.0",
+  "description": "Static, zero-AI security scanner for Claude Code skills, MCP servers, npm packages, VS Code extensions, and GitHub Actions workflows.",
+  "license": "MIT",
+  "author": "Maxwell Young",
+  "homepage": "https://github.com/maxwellyoung/skillscan#command-line",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maxwellyoung/skillscan.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/maxwellyoung/skillscan/issues"
+  },
+  "keywords": [
+    "security",
+    "scanner",
+    "claude-code",
+    "mcp",
+    "supply-chain",
+    "sarif",
+    "github-actions"
+  ],
+  "bin": {
+    "skillscan": "dist/cli.js"
+  },
+  "files": [
+    "dist/cli.js"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "prepublishOnly": "npm --prefix ../.. run build:cli && npm --prefix ../.. test"
+  }
+}

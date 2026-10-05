@@ -10,8 +10,20 @@ SkillScan is a fast, free security scanner for ClawdHub skills, Claude Code skil
 pnpm dev              # Start development server (Next.js)
 pnpm build            # Build for production
 pnpm start            # Start production server
-pnpm lint             # ESLint code checking
+pnpm lint             # ESLint code checking (app, lib, cli, test, scripts)
+pnpm test             # Node test runner (scanner evals + CLI/SARIF tests)
+pnpm skillscan <path> # Run the CLI from source (see cli/)
+pnpm build:cli        # Bundle the CLI to packages/cli/dist/cli.js (npm: @maxwellyoung/skillscan)
 ```
+
+The CLI (`cli/`), the GitHub Action (`action.yml`), and `app/api/scan/route.ts` share
+`lib/scanner.ts`, `lib/targets.ts` (remote URL resolution), and `lib/files.ts`
+(file-selection rules). Do not duplicate scan or fetch logic in the CLI.
+
+`packages/cli` is the only publishable package (`@maxwellyoung/skillscan`); it ships a
+single esbuild bundle with no runtime dependencies. The root package is the private
+Next.js app deployed to Vercel: do not add `engines`, `bin`, or `files` to the root
+`package.json` (a root `engines` range overrides the Vercel project's Node version).
 
 ## Architecture
 

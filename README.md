@@ -1,6 +1,6 @@
 # SkillScan
 
-Static security scanning for AI skills, MCP servers, npm packages, VS Code extensions, and GitHub Actions workflows.
+Static security scanning for AI skills, MCP servers, npm packages, VS Code extensions, and GitHub Actions workflows. Use it from the web UI, the `POST /api/scan` API, the `skillscan` CLI, or the GitHub Action (JSON and SARIF output).
 
 SkillScan checks local skill instructions, GitHub-hosted code, npm package metadata, OpenVSX extension metadata, GitHub Actions workflows, and MCP server repositories for risky patterns before you install or run them. It is intentionally fast and boring: static analysis, clear findings, and remediation notes.
 
@@ -32,6 +32,7 @@ His advice? "Read every file or feed files to AI to check safety." **We automate
 - 0-100 security score with A-F grades.
 - Pattern checks for shell execution, network access, file-system access, prompt injection, credential patterns, data exfiltration, package install hooks, extension activation behavior, and CI workflow trust boundaries.
 - No AI inference required for the core scan.
+- CLI with human, JSON, and SARIF 2.1.0 output plus CI exit codes; composite GitHub Action with optional code scanning upload.
 - Explicit install verdicts: pass, manual review, or block install.
 - Committed malicious fixture corpus for token exfiltration, malicious install hooks, hostile skill instructions, and persistence attempts.
 - False-positive eval against installed local Codex, agents, and plugin skills.
@@ -142,6 +143,107 @@ https://github.com/username/repo/blob/main/file.ts
 ### Scan Code Directly
 Paste skill instructions, package manifests, extension manifests, GitHub Actions workflows, or source code directly into the scanner.
 
+## Command line
+
+The `skillscan` CLI runs the same scanner as the web app and API (`lib/scanner.ts`), entirely offline for local paths. No AI, no account, and local files are never uploaded.
+
+```bash
+npx @maxwellyoung/skillscan ./my-skill      # one-off run, Node.js 20+
+npm install -g @maxwellyoung/skillscan      # or install the `skillscan` command
+```
+
+The package is a single bundled file with no runtime dependencies. The unscoped `skillscan` name on npm belongs to an unrelated project; use the `@maxwellyoung` scope.
+
+> Not yet published to npm. Until it is, run it from a checkout:
+> `pnpm install && pnpm skillscan <target>` (or `pnpm build:cli && node packages/cli/dist/cli.js <target>`).
+
+```bash
+skillscan ./my-skill                     # Claude Code skill folder
+skillscan ./my-mcp-server                # MCP server repo (includes .github/workflows)
+skillscan ./my-extension --json          # VS Code extension folder, JSON result
+skillscan . --sarif -o skillscan.sarif   # SARIF 2.1.0 for GitHub code scanning
+skillscan pkg:npm/left-pad@1.3.0         # npm package (metadata + tarball)
+skillscan https://github.com/owner/repo  # GitHub repo, tree, or blob URL
+skillscan https://open-vsx.org/extension/publisher/name
+```
+
+Local directories are walked recursively (skipping `node_modules` and `.git`, not following symlinks) using the same file-selection rules as GitHub scans, capped at 2,000 files and 250 KB per file; anything truncated is reported as a scan warning. A path to a single file is always scanned, whatever its extension.
+
+| Option | Meaning |
+| --- | --- |
+| `--json` | Full scan result as JSON (same shape as `POST /api/scan`) |
+| `--sarif` | SARIF 2.1.0 log: one rule per finding category, results with file/line/snippet locations and `security-severity` for code scanning |
+| `-o, --output <file>` | Write the report to a file; the human-readable report still goes to stdout |
+| `--fail-on <severity>` | `critical` (default, equivalent to the "block install" verdict), `high`, `medium`, `low`, `info`, or `none` |
+| `--verbose` | Also list informational findings in text output |
+
+Exit codes: `0` nothing at or above `--fail-on`, `1` at least one finding at or above `--fail-on`, `2` usage error or the scan could not run.
+
+## GitHub Action
+
+`action.yml` is a composite action that runs the CLI on a path and can upload the SARIF report to GitHub code scanning.
+
+```yaml
+name: SkillScan
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write   # only needed when upload-sarif is true
+
+jobs:
+  skillscan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxwellyoung/skillscan@<commit-sha>   # pin to a full commit SHA
+        with:
+          path: .                 # local path or supported URL
+          fail-on: critical       # critical | high | medium | low | info | none
+          upload-sarif: true      # needs code scanning enabled on the repo
+```
+
+| Input | Default | Description |
+| --- | --- | --- |
+| `path` | `.` | Local path or supported URL to scan |
+| `fail-on` | `critical` | Severity threshold that fails the step |
+| `sarif-file` | `skillscan.sarif` | Where the SARIF report is written |
+| `upload-sarif` | `false` | Upload via `github/codeql-action/upload-sarif` |
+| `category` | `skillscan` | Code scanning category for the upload |
+| `node-version` | `22` | Node.js used to run the scanner |
+| `cli-source` | `source` | `source` runs the TypeScript CLI from the action checkout with `npx tsx@4.22.3`; `npm` runs the published `@maxwellyoung/skillscan` package |
+| `cli-version` | `0.1.0` | Exact package version used when `cli-source` is `npm` |
+
+Outputs: `exit-code` (`0`/`1`/`2`) and `sarif-file`. SARIF is uploaded before the fail-on check, so findings reach code scanning even when the step fails. Either way the action downloads one package from npm at run time (`tsx`, or the bundled CLI); it does not send scanned files anywhere. The default will switch to `npm` once the package is published.
+
+## How skillscan compares
+
+Checked against each project's own README, docs, and source on 2026-10-04. Cells marked "unverified" could not be confirmed from a primary source.
+
+| | SkillScan | [Snyk Agent Scan](https://github.com/snyk/agent-scan) (formerly Invariant Labs MCP-Scan) | [Cisco MCP Scanner](https://github.com/cisco-ai-defense/mcp-scanner) |
+| --- | --- | --- | --- |
+| Approach | Static regex/heuristic rules over files | Discovers agent configs, connects to MCP servers, sends tool descriptions and skill content to the Snyk Agent Scan API for analysis | Pluggable analyzers: YARA rules, regex, Cisco AI Defense API, LLM-as-judge, behavioral code analysis |
+| Works fully offline, no API key | Yes for local paths (remote targets fetch from GitHub/npm/OpenVSX) | No: requires a Snyk API token; the CLI only lists components without analysis | Yes with `--analyzers yara` (and the `static` subcommand); the default analyzers (`api,yara,llm`) need API keys |
+| Uses an LLM | No | Unverified (server-side engine not documented) | Optional (LLM and behavioral analyzers; local models supported) |
+| Connects to / runs live MCP servers | No | Yes (with consent prompt) | Yes (`remote`, `stdio`, `config` subcommands) |
+| Claude Code skills (`SKILL.md`) | Yes | Yes | No (Cisco ships a separate `skill-scanner` project) |
+| MCP server source code | Yes (pattern rules) | No | Yes (behavioral analyzer, YARA) |
+| npm packages | Yes (registry metadata + tarball contents) | No | Yes (`npm-scan`) |
+| VS Code extensions | Yes (local folders, OpenVSX + VSIX contents) | Only MCP servers/skills bundled in extensions | No |
+| GitHub Actions workflows | Yes | No | No |
+| JSON output | Yes | Yes (`--json`, schema marked experimental) | Yes (`raw` format) |
+| SARIF output | Yes | No | No |
+| Official GitHub Action | Yes (`action.yml`) | No (`--ci` flag for CI use) | No |
+| Non-zero exit on findings | Yes (`--fail-on`) | Yes (exit 1 when risks remain in CI mode) | Unverified |
+| Runtime guard / proxy | No | Agent Guard hooks that forward events to Snyk Evo (enterprise) | No |
+| Language / install | TypeScript; `npx @maxwellyoung/skillscan` (Node.js 20+, not yet published) or from source | Python; `uvx snyk-agent-scan@latest` or standalone binaries | Python; `uv tool install cisco-ai-mcp-scanner` or pip |
+| License | MIT | Apache-2.0 | Apache-2.0 |
+
+Where the others are stronger: both can inspect live MCP servers and their actual tool descriptions, Cisco's behavioral analyzer does cross-file dataflow for Python, and Snyk Agent Scan auto-discovers agent configs across many clients. SkillScan's patterns are regex heuristics, so expect false positives and sophisticated evasions to be missed.
+
 ## Why SkillScan Exists
 
 ClawdHub has **zero vetting**. Any skill can be published. The Nick Saraev video showed:
@@ -183,6 +285,7 @@ Scan code, GitHub repositories, npm packages, OpenVSX extensions, GitHub Actions
       "title": "Network request detected",
       "description": "Code makes network requests which could be used for data exfiltration.",
       "file": "index.ts",
+      "path": "src/index.ts",
       "line": 42,
       "snippet": "fetch('https://api.example.com/data')",
       "remediation": "Ensure URLs are validated and requests are to trusted domains only."
@@ -211,11 +314,16 @@ pnpm build
 ### Quality Checks
 ```bash
 pnpm test
+npx tsc --noEmit
 pnpm eval:malicious
 pnpm eval:local-skills
 pnpm lint
+pnpm build:cli
 pnpm build
 ```
+
+### npm package
+The published package lives in `packages/cli` (`@maxwellyoung/skillscan`, bin `skillscan`). `pnpm build:cli` uses esbuild to bundle `cli/` and `lib/` into `packages/cli/dist/cli.js` with no runtime dependencies and copies `LICENSE` alongside it. The root package is the private Next.js app and is never published. Keep `cli/version.ts` in sync with `packages/cli/package.json` (a test checks this).
 
 ## Case Study
 

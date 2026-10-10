@@ -1,4 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -8,7 +7,6 @@
 }
 
 body {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
   margin: 0;
   padding: 0;
   min-height: 100vh;
@@ -21,9 +19,15 @@ body {
   background: hsl(355, 78%, 58%, 0.3);
 }
 
-/* Textarea focus ring */
+/* Textarea focus is drawn by its wrapper; everything else keeps a visible ring. */
 textarea:focus {
   outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid hsl(0 0% 100% / 0.5);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 .pressable {
@@ -52,7 +56,7 @@ textarea:focus {
   border: 1px solid hsl(0, 0%, 10%);
   border-radius: 6px;
   padding: 0.875rem 1rem;
-  font-family: 'SF Mono', 'Fira Code', 'Fira Mono', monospace;
+  font-family: var(--font-mono), ui-monospace, monospace;
   font-size: 0.8125rem;
   line-height: 1.6;
   overflow-x: auto;
@@ -60,27 +64,12 @@ textarea:focus {
 }
 
 .code-block .ln {
-  color: hsl(0, 0%, 25%);
+  color: hsl(0, 0%, 38%);
   user-select: none;
   margin-right: 1rem;
   display: inline-block;
   width: 1.5rem;
   text-align: right;
-}
-
-/* Score glow — Muriel Cooper depth */
-.score-glow {
-  text-shadow:
-    0 0 40px currentColor,
-    0 0 80px currentColor;
-  opacity: 0.15;
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-  z-index: 0;
 }
 
 :root {

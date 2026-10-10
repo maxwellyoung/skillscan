@@ -1,7 +1,7 @@
 import { gunzipSync, inflateRawSync } from 'node:zlib';
 import { GitHubFile, FetchBundle } from './types';
 import { decodeTextContent } from './files';
-import { RemoteBudget, readBoundedResponse, readBoundedJson, trustedFetch } from './remote';
+import { RemoteBudget, ResponseTooLargeError, readBoundedResponse, readBoundedJson, trustedFetch } from './remote';
 import { trustedHttpsUrl } from './urls';
 
 const MAX_ARTIFACT_BYTES = 6_000_000;
@@ -44,7 +44,7 @@ function parseOpenVsxUrl(input: string): { namespace: string; extension: string;
   } catch { return null; }
 }
 
-async function fetchArtifact(url: string, warnings: string[], hosts: string[], budget: RemoteBudget): Promise<Buffer | null> {
+async function fetchArtifact(url: string, warnings: string[], hosts: string[], budget: RemoteBudget): Promise<{ bytes: Buffer; lastModified?: string } | null> {
   try {
     // Follow only explicitly validated registry/CDN redirects. No credentials are attached.
     let response: Response | undefined;
@@ -59,7 +59,8 @@ async function fetchArtifact(url: string, warnings: string[], hosts: string[], b
       response = undefined;
     }
     if (!response?.ok) throw new Error('Artifact download failed or exceeded redirect limit');
-    return Buffer.from(await readBoundedResponse(response, MAX_ARTIFACT_BYTES));
+    const lastModified = response.headers.get('last-modified') ?? undefined;
+    return { bytes: Buffer.from(await readBoundedResponse(response, MAX_ARTIFACT_BYTES)), lastModified };
   } catch (error) {
     warnings.push(`Artifact fetch failed: ${error instanceof Error ? error.message : 'unknown error'}`);
     return null;
@@ -246,6 +247,7 @@ interface RegistryMetadata {
   files?: { download?: string; downloadUrl?: string }; downloadUrl?: string;
 }
 interface PackageManifest {
+  name?: string; version?: string; maintainers?: unknown;
   repository?: unknown; homepage?: unknown; bugs?: unknown;
   dist?: { tarball?: string };
 }
@@ -265,17 +267,41 @@ export class RegistryFetcher {
     const warnings: string[] = [];
     const fetchedAt = new Date().toISOString();
 
-    const response = await trustedFetch(`https://registry.npmjs.org/${encodePackageName(spec.name)}`, ['registry.npmjs.org'], budget, {
-      headers: { 'User-Agent': 'SkillScan-Security-Scanner/1.0' },
-    });
+    const registryHosts = ['registry.npmjs.org'];
+    const headers = { 'User-Agent': 'SkillScan-Security-Scanner/1.0' };
+    const response = await trustedFetch(`https://registry.npmjs.org/${encodePackageName(spec.name)}`, registryHosts, budget, { headers });
 
     if (!response.ok) throw new Error(`Failed to fetch npm metadata: ${response.statusText}`);
 
-    const metadata = await readBoundedJson(response) as RegistryMetadata;
-    const version = spec.version || metadata['dist-tags']?.latest;
-    const packageJson = metadata.versions?.[version ?? ""];
+    let metadata: RegistryMetadata | undefined;
+    try {
+      metadata = await readBoundedJson(response) as RegistryMetadata;
+    } catch (error) {
+      if (!(error instanceof ResponseTooLargeError)) throw error;
+    }
 
-    if (!packageJson) throw new Error(`npm package version not found: ${spec.name}@${version ?? 'latest'}`);
+    let version: string | undefined;
+    let packageJson: PackageManifest | undefined;
+    let time = metadata?.time as Record<string, string> | undefined;
+    let publishedAtSource: 'registry' | 'tarball-last-modified' | undefined = time ? 'registry' : undefined;
+
+    if (metadata) {
+      version = spec.version || metadata['dist-tags']?.latest;
+      packageJson = metadata.versions?.[version ?? ''];
+    } else {
+      // Popular packages publish multi-megabyte packuments (react ~7 MB, next ~31 MB).
+      // Read the small per-version manifest instead; publish time then comes from the tarball.
+      const manifestResponse = await trustedFetch(
+        `https://registry.npmjs.org/${encodePackageName(spec.name)}/${encodeURIComponent(spec.version || 'latest')}`,
+        registryHosts, budget, { headers },
+      );
+      if (manifestResponse.ok) {
+        packageJson = await readBoundedJson(manifestResponse) as PackageManifest;
+        version = packageJson.version;
+      }
+    }
+
+    if (!packageJson || !version) throw new Error(`npm package version not found: ${spec.name}@${version ?? spec.version ?? 'latest'}`);
 
     const files: GitHubFile[] = [
       {
@@ -283,32 +309,43 @@ export class RegistryFetcher {
         path: `npm:${spec.name}@${version}/package.json`,
         content: JSON.stringify(packageJson, null, 2),
       },
-      {
-        name: 'npm-metadata.json',
-        path: `npm:${spec.name}@${version}/npm-metadata.json`,
-        content: JSON.stringify({
-          name: metadata.name,
-          version,
-          distTags: metadata['dist-tags'],
-          time: metadata.time,
-          maintainers: metadata.maintainers,
-          repository: packageJson.repository,
-          homepage: packageJson.homepage,
-          bugs: packageJson.bugs,
-          dist: packageJson.dist,
-        }, null, 2),
-      },
     ];
 
     const tarballUrl = packageJson.dist?.tarball;
     if (tarballUrl) {
-      const artifact = await fetchArtifact(tarballUrl, warnings, ['registry.npmjs.org'], budget);
+      const artifact = await fetchArtifact(tarballUrl, warnings, registryHosts, budget);
       if (artifact) {
-        files.push(...extractTgz(artifact, `npm:${spec.name}@${version}`, warnings));
+        files.push(...extractTgz(artifact.bytes, `npm:${spec.name}@${version}`, warnings));
+        // The CDN stores the tarball at publish, so Last-Modified is never earlier than the
+        // publish time. Using it errs toward flagging a version as fresh, not hiding it.
+        const storedAt = artifact.lastModified ? Date.parse(artifact.lastModified) : NaN;
+        if (!time?.[version] && Number.isFinite(storedAt)) {
+          time = { ...time, [version]: new Date(storedAt).toISOString() };
+          publishedAtSource = 'tarball-last-modified';
+        }
       }
     } else {
       warnings.push('npm registry metadata did not include a tarball URL.');
     }
+
+    if (!metadata && !time?.[version]) warnings.push('npm publish time was unavailable; the registry freshness check did not run.');
+
+    files.splice(1, 0, {
+      name: 'npm-metadata.json',
+      path: `npm:${spec.name}@${version}/npm-metadata.json`,
+      content: JSON.stringify({
+        name: metadata?.name ?? packageJson.name ?? spec.name,
+        version,
+        distTags: metadata?.['dist-tags'],
+        time,
+        publishedAtSource,
+        maintainers: metadata?.maintainers ?? packageJson.maintainers,
+        repository: packageJson.repository,
+        homepage: packageJson.homepage,
+        bugs: packageJson.bugs,
+        dist: packageJson.dist,
+      }, null, 2),
+    });
 
     return {
       files,
@@ -359,7 +396,7 @@ export class RegistryFetcher {
 
     const downloadUrl = metadata.files?.download || metadata.files?.downloadUrl || metadata.downloadUrl;
     if (downloadUrl) {
-      const artifact = await fetchArtifact(downloadUrl, warnings, ['open-vsx.org', 'openvsx.eclipsecontent.org'], budget);
+      const artifact = (await fetchArtifact(downloadUrl, warnings, ['open-vsx.org', 'openvsx.eclipsecontent.org'], budget))?.bytes;
       if (artifact) {
         files.push(...extractZip(artifact, `openvsx:${spec.namespace}.${spec.extension}`, warnings));
       }

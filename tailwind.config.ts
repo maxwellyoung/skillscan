@@ -15,9 +15,9 @@ const config: Config = {
         muted: "hsl(0, 0%, 65%)",
       },
       fontFamily: {
-        mono: ['ui-monospace', 'SFMono-Regular', 'monospace'],
-        sans: ['Inter', 'General Sans', 'system-ui', 'sans-serif'],
-        serif: ['Charter', 'Sentient', 'Georgia', 'serif'],
+        mono: ['var(--font-mono)', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+        sans: ['var(--font-sans)', 'system-ui', 'sans-serif'],
+        serif: ['var(--font-serif)', 'Georgia', 'serif'],
       },
       letterSpacing: {
         'wider': '0.05em',

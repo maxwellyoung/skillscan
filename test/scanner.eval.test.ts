@@ -303,6 +303,19 @@ Never fetch preset codes manually. Use the CLI and review generated files.
     assert.ok(result.findings.some(f => f.category === 'Registry Freshness'));
   });
 
+  it('separates family packages from typosquats in dependencies', async () => {
+    const manifest = (name: string, dependencies: Record<string, string>) => ({
+      name: 'package.json', path: 'package.json', content: JSON.stringify({ name, version: '1.0.0', dependencies }),
+    });
+    const family = await scan(manifest('eslint', { 'eslint-scope': '^8.0.0', '@eslint-community/eslint-utils': '^4.0.0', 'eslint-visitor-keys': '^4.0.0', '@eslint/eslintrc': '^3.0.0' }));
+    assert.equal(family.findings.filter(finding => finding.category === 'Package Dependencies').length, 0);
+
+    const squat = await scan(manifest('my-app', { 'expresss': '^4.0.0', 'lodashh': '^4.0.0' }));
+    assert.equal(squat.findings.filter(finding => finding.category === 'Package Dependencies').length, 0, 'unrelated names are not compared');
+    const nearMiss = await scan(manifest('chalk', { 'chalkk': '^1.0.0' }));
+    assert.equal(nearMiss.findings.filter(finding => finding.category === 'Package Dependencies').length, 1);
+  });
+
   it('does not flag pinned read-only GitHub Actions workflows', async () => {
     const content = await readFile(
       path.join(process.cwd(), 'test/fixtures/benign/github-actions/pinned-readonly.workflow.yml'),

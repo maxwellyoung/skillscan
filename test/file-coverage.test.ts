@@ -144,6 +144,33 @@ describe('text file coverage and Markdown evasion', () => {
     }
   });
 
+  it('scans popular npm packages whose full registry metadata exceeds the size limit', async t => {
+    const tgz = tar([['package/package.json', Buffer.from('{"name":"big","version":"2.0.0"}')]]);
+    const storedAt = new Date(Date.now() - 60 * 60 * 1000).toUTCString();
+    const urls: string[] = [];
+    t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+      const url = String(input);
+      urls.push(url);
+      if (url === 'https://registry.npmjs.org/big') return new Response('x'.repeat(2_000_001));
+      if (url === 'https://registry.npmjs.org/big/latest') return Response.json({
+        name: 'big', version: '2.0.0', maintainers: [{ name: 'owner' }],
+        dist: { integrity: 'sha512-x', tarball: 'https://registry.npmjs.org/big/-/big-2.0.0.tgz' },
+      });
+      if (url.endsWith('.tgz')) return new Response(new Uint8Array(tgz), { headers: { 'last-modified': storedAt } });
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    const bundle = await RegistryFetcher.fetchNpm('https://www.npmjs.com/package/big');
+    const metadata = JSON.parse(bundle.files.find(file => file.name === 'npm-metadata.json')!.content);
+    assert.deepEqual(urls.slice(0, 2), ['https://registry.npmjs.org/big', 'https://registry.npmjs.org/big/latest']);
+    assert.equal(metadata.version, '2.0.0');
+    assert.equal(metadata.publishedAtSource, 'tarball-last-modified');
+    assert.equal(bundle.partial, false);
+    // The tarball timestamp still drives the freshness check for a just-published version.
+    const result = await new SecurityScanner().scan(bundle.files);
+    assert.ok(result.findings.some(finding => finding.category === 'Registry Freshness' && finding.severity === 'high'));
+  });
+
   it('stops compressed bombs at actual output limits and reports partial coverage', async t => {
     const gzipBomb = gzipSync(Buffer.alloc(12_000_001, 32));
     const zipBomb = zip([['package/index.js', Buffer.alloc(180_001, 32)]], 1);

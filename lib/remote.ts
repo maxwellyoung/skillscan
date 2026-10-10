@@ -20,11 +20,16 @@ export async function trustedFetch(input: string, hosts: readonly string[], budg
   return fetch(url.href, { ...init, redirect: 'error', signal: budget.nextSignal(), cache: 'no-store' });
 }
 
+/** A response that crossed its byte limit; callers may fall back to a smaller source. */
+export class ResponseTooLargeError extends Error {
+  constructor() { super('Response exceeds the scan size limit'); }
+}
+
 /** Limits actual streamed bytes, independently of attacker-provided length headers. */
 export async function readBoundedResponse(response: Response, maxBytes: number, signal?: AbortSignal): Promise<Uint8Array> {
   if (Number(response.headers.get('content-length')) > maxBytes) {
     await response.body?.cancel();
-    throw new Error('Response exceeds the scan size limit');
+    throw new ResponseTooLargeError();
   }
   if (!response.body) return new Uint8Array();
   const reader = response.body.getReader();
@@ -40,7 +45,7 @@ export async function readBoundedResponse(response: Response, maxBytes: number, 
       size += value.length;
       if (size > maxBytes) {
         await reader.cancel();
-        throw new Error('Response exceeds the scan size limit');
+        throw new ResponseTooLargeError();
       }
       chunks.push(value);
     }

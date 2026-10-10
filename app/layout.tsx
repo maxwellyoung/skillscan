@@ -1,5 +1,13 @@
 import type { Metadata, Viewport } from "next";
+import localFont from "next/font/local";
+import { Newsreader } from "next/font/google";
 import "./globals.css";
+
+const sans = localFont({ src: "./fonts/GeistVF.woff", variable: "--font-sans", weight: "100 900" });
+const mono = localFont({ src: "./fonts/GeistMonoVF.woff", variable: "--font-mono", weight: "100 900" });
+const serif = Newsreader({ subsets: ["latin"], variable: "--font-serif", weight: ["300", "400"], style: ["normal"] });
+
+const SITE_URL = "https://skillscan.ninetynine.digital";
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -8,10 +16,10 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://skillscan.dev"),
+  metadataBase: new URL(SITE_URL),
   title: "SkillScan – Security Scanner for AI Skills, npm & VS Code",
   description:
-    "Free, instant security scanning for AI skills, MCP servers, npm packages, VS Code extensions, GitHub Actions, and GitHub repos. 29 deterministic checks. Know what you're installing before it accesses your system.",
+    "Static security checks for agent skills, MCP servers, npm packages, VS Code extensions, and GitHub Actions. Source-linked findings in the browser, the npm CLI, or CI.",
   keywords:
     "claude code, mcp, npm security, vscode extension security, security scanner, static analysis, skill scanner, ai security, vulnerability scanner, github security, code analysis, supply chain security",
   authors: [{ name: "ninetynine.digital", url: "https://ninetynine.digital" }],
@@ -19,7 +27,7 @@ export const metadata: Metadata = {
     title: "SkillScan – Security Scanner for AI Skills, npm & VS Code",
     description:
       "Free, instant security analysis for AI skills, npm packages, VS Code extensions, GitHub Actions, and MCP servers. 29 deterministic checks. Know what you're installing.",
-    url: "https://skillscan.dev",
+    url: SITE_URL,
     siteName: "SkillScan",
     type: "website",
     images: [
@@ -51,16 +59,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <head>
-        <link rel="icon" href="/favicon.ico" />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link
-          rel="preconnect"
-          href="https://fonts.gstatic.com"
-          crossOrigin="anonymous"
-        />
-      </head>
-      <body className="antialiased">{children}</body>
+      <body className={`${sans.variable} ${mono.variable} ${serif.variable} font-sans antialiased`}>
+        {children}
+      </body>
     </html>
   );
 }

@@ -1216,6 +1216,20 @@ export class SecurityScanner {
 
   private looksLikeTyposquat(packageName: string, dependencyName: string): boolean {
     if (!packageName || !dependencyName) return false;
+    // Family packages extend a name at a delimiter (eslint -> eslint-scope, react -> react-dom);
+    // typosquats are near-miss spellings of it, so only undelimited overlaps count.
+    const bare = (value: string) => value.replace(/^@[^/]+\//, '').toLowerCase();
+    const extendsAtDelimiter = (longer: string, shorter: string) =>
+      longer.length > shorter.length && (
+        (longer.startsWith(shorter) && /[-_.]/.test(longer[shorter.length])) ||
+        (longer.endsWith(shorter) && /[-_.]/.test(longer[longer.length - shorter.length - 1]))
+      );
+    const [a, b] = [bare(packageName), bare(dependencyName)];
+    if (extendsAtDelimiter(a, b) || extendsAtDelimiter(b, a)) return false;
+    // npm scopes are owned, so a dependency under the package's own name or scope is first-party.
+    const scopeOf = (value: string) => value.match(/^@([^/]+)\//)?.[1]?.toLowerCase();
+    const depScope = scopeOf(dependencyName);
+    if (depScope && (depScope === a || depScope === scopeOf(packageName))) return false;
     const normalize = (value: string) => value.replace(/^@[^/]+\//, '').replace(/[-_.]/g, '').toLowerCase();
     const pkg = normalize(packageName);
     const dep = normalize(dependencyName);

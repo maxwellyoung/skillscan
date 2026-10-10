@@ -35,9 +35,9 @@ inputs:
     required: false
     default: '22'
   cli-source:
-    description: 'Where the scanner comes from: "source" runs the TypeScript CLI from this action checkout with tsx; "npm" runs the published @maxwellyoung/skillscan package at cli-version. Defaults to "source" until the package is published.'
+    description: 'Where the scanner comes from: "source" runs the TypeScript CLI from this action checkout with tsx; "npm" runs the published @maxwellyoung/skillscan package at cli-version. Defaults to the published, pinned npm release.'
     required: false
-    default: 'source'
+    default: 'npm'
   cli-version:
     description: 'Exact @maxwellyoung/skillscan version used when cli-source is "npm".'
     required: false

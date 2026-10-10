@@ -154,8 +154,9 @@ npm install -g @maxwellyoung/skillscan      # or install the `skillscan` command
 
 The package is a single bundled file with no runtime dependencies. The unscoped `skillscan` name on npm belongs to an unrelated project; use the `@maxwellyoung` scope.
 
-> Not yet published to npm. Until it is, run it from a checkout:
-> `pnpm install && pnpm skillscan <target>` (or `pnpm build:cli && node packages/cli/dist/cli.js <target>`).
+From a checkout, use `pnpm install && pnpm skillscan <target>` or
+`pnpm build:cli && node packages/cli/dist/cli.js <target>`.
+The first public npm release is `@maxwellyoung/skillscan@0.1.0`.
 
 ```bash
 skillscan ./my-skill                     # Claude Code skill folder
@@ -230,10 +231,10 @@ jobs:
 | `category` | `skillscan` | Code scanning category for the upload |
 | `node-version` | `22` | Node.js used to run the scanner |
 | `exclude` | empty | Newline-separated explicit path globs, forwarded to `--exclude` |
-| `cli-source` | `source` | `source` runs the TypeScript CLI from the action checkout with `npx tsx@4.22.3`; `npm` runs the published `@maxwellyoung/skillscan` package |
+| `cli-source` | `npm` | `source` runs the TypeScript CLI from the action checkout with `npx tsx@4.22.3`; `npm` runs the published `@maxwellyoung/skillscan` package |
 | `cli-version` | `0.1.0` | Exact package version used when `cli-source` is `npm` |
 
-Outputs: `exit-code` (`0`/`1`/`2`) and `sarif-file`. SARIF is uploaded before the fail-on check, so findings reach code scanning even when the step fails. Either way the action downloads one package from npm at run time (`tsx`, or the bundled CLI); it does not send scanned files anywhere. The default will switch to `npm` once the package is published.
+Outputs: `exit-code` (`0`/`1`/`2`) and `sarif-file`. SARIF is uploaded before the fail-on check, so findings reach code scanning even when the step fails. Either way the action downloads one package from npm at run time (`tsx`, or the bundled CLI); it does not send scanned files anywhere. The default uses the published, pinned npm release; choose `source` to scan with the implementation in the action checkout.
 
 ## How skillscan compares
 
@@ -255,7 +256,7 @@ Checked against each project's own README, docs, and source on 2026-10-04. Cells
 | Official GitHub Action | Yes (`action.yml`) | No (`--ci` flag for CI use) | No |
 | Non-zero exit on findings | Yes (`--fail-on`) | Yes (exit 1 when risks remain in CI mode) | Unverified |
 | Runtime guard / proxy | No | Agent Guard hooks that forward events to Snyk Evo (enterprise) | No |
-| Language / install | TypeScript; `npx @maxwellyoung/skillscan` (Node.js 20.3+, not yet published) or from source | Python; `uvx snyk-agent-scan@latest` or standalone binaries | Python; `uv tool install cisco-ai-mcp-scanner` or pip |
+| Language / install | TypeScript; `npx @maxwellyoung/skillscan` (Node.js 20.3+) or from source | Python; `uvx snyk-agent-scan@latest` or standalone binaries | Python; `uv tool install cisco-ai-mcp-scanner` or pip |
 | License | MIT | Apache-2.0 | Apache-2.0 |
 
 Where the others are stronger: both can inspect live MCP servers and their actual tool descriptions, Cisco's behavioral analyzer does cross-file dataflow for Python, and Snyk Agent Scan auto-discovers agent configs across many clients. SkillScan's patterns are regex heuristics, so expect false positives and sophisticated evasions to be missed.

@@ -42,7 +42,8 @@ const SUPPORTED_URL_PATTERN = /^(https?:\/\/)?(github\.com|raw\.githubuserconten
 function detectInputType(value: string): 'url' | 'code' {
   const trimmed = value.trim();
   if (trimmed.includes('\n')) return 'code';
-  return SUPPORTED_URL_PATTERN.test(trimmed) ? 'url' : 'code';
+  // Unsupported destinations must reach API validation, not get a code verdict.
+  return SUPPORTED_URL_PATTERN.test(trimmed) || /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? 'url' : 'code';
 }
 
 function DotMatrixLoader({ label = 'Scanning' }: { label?: string }) {
@@ -84,10 +85,12 @@ export default function Home() {
 
     try {
       const type = detectInputType(input);
+      const trimmed = input.trim();
+      const value = type === 'url' && !/^[a-z][a-z0-9+.-]*:/i.test(trimmed) ? `https://${trimmed}` : trimmed;
       const res = await fetch('/api/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [type]: input.trim() }),
+        body: JSON.stringify({ [type]: value }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Scan failed');

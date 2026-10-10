@@ -1,36 +1,11 @@
 import { gunzipSync, inflateRawSync } from 'node:zlib';
 import { GitHubFile, FetchBundle } from './types';
+import { decodeTextContent } from './files';
 
 const MAX_ARTIFACT_BYTES = 6_000_000;
 const MAX_EXTRACTED_FILES = 40;
 const MAX_EXTRACTED_FILE_BYTES = 180_000;
-const TEXT_EXTENSIONS = new Set([
-  '.js',
-  '.cjs',
-  '.mjs',
-  '.ts',
-  '.tsx',
-  '.jsx',
-  '.json',
-  '.yml',
-  '.yaml',
-  '.sh',
-  '.py',
-  '.rb',
-  '.go',
-  '.rs',
-  '.md',
-  '.txt',
-  '.env',
-]);
-const IMPORTANT_BASENAMES = new Set([
-  'package.json',
-  'extension.js',
-  'main.js',
-  'index.js',
-  'readme.md',
-  'license',
-]);
+const MAX_INFLATED_ARTIFACT_BYTES = 12_000_000;
 
 function encodePackageName(name: string): string {
   return name.startsWith('@') ? `@${encodeURIComponent(name.slice(1))}` : encodeURIComponent(name);
@@ -69,19 +44,6 @@ function parseOpenVsxUrl(input: string): { namespace: string; extension: string;
   };
 }
 
-function extensionFor(filePath: string): string {
-  const match = filePath.toLowerCase().match(/(\.[a-z0-9]+)$/);
-  return match?.[1] || '';
-}
-
-function basename(filePath: string): string {
-  return filePath.split('/').pop()?.toLowerCase() || filePath.toLowerCase();
-}
-
-function shouldExtractTextFile(filePath: string): boolean {
-  return TEXT_EXTENSIONS.has(extensionFor(filePath)) || IMPORTANT_BASENAMES.has(basename(filePath));
-}
-
 async function fetchArtifact(url: string, warnings: string[]): Promise<Buffer | null> {
   try {
     const response = await fetch(url, {
@@ -112,6 +74,10 @@ async function fetchArtifact(url: string, warnings: string[]): Promise<Buffer | 
   }
 }
 
+function basename(filePath: string): string {
+  return filePath.split('/').pop()?.toLowerCase() || filePath.toLowerCase();
+}
+
 function parseTarString(buffer: Buffer, start: number, length: number): string {
   return buffer.subarray(start, start + length).toString('utf8').split('\0')[0].trim();
 }
@@ -124,9 +90,9 @@ function parseTarSize(buffer: Buffer, start: number): number {
 function extractTgz(buffer: Buffer, pathPrefix: string, warnings: string[]): GitHubFile[] {
   let tar: Buffer;
   try {
-    tar = gunzipSync(buffer);
+    tar = gunzipSync(buffer, { maxOutputLength: MAX_INFLATED_ARTIFACT_BYTES });
   } catch {
-    warnings.push('npm tarball could not be decompressed.');
+    warnings.push(`npm tarball could not be decompressed within the ${MAX_INFLATED_ARTIFACT_BYTES}-byte limit.`);
     return [];
   }
 
@@ -141,14 +107,18 @@ function extractTgz(buffer: Buffer, pathPrefix: string, warnings: string[]): Git
     const size = parseTarSize(tar, offset + 124);
     const dataStart = offset + 512;
 
-    if ((typeFlag === '' || typeFlag === '0') && shouldExtractTextFile(name)) {
+    if (typeFlag === '' || typeFlag === '0') {
       const truncated = size > MAX_EXTRACTED_FILE_BYTES;
       const contentBuffer = tar.subarray(dataStart, dataStart + Math.min(size, MAX_EXTRACTED_FILE_BYTES));
-      files.push({
-        name: basename(name),
-        path: `${pathPrefix}/tarball/${name}`,
-        content: contentBuffer.toString('utf8') + (truncated ? '\n/* truncated by SkillScan */' : ''),
-      });
+      const content = decodeTextContent(contentBuffer, truncated);
+      if (content !== null) {
+        if (truncated) warnings.push(`Tarball file ${name} was truncated to ${MAX_EXTRACTED_FILE_BYTES} bytes.`);
+        files.push({
+          name: basename(name),
+          path: `${pathPrefix}/tarball/${name}`,
+          content,
+        });
+      }
     }
 
     offset = dataStart + Math.ceil(size / 512) * 512;
@@ -196,7 +166,7 @@ function extractZip(buffer: Buffer, pathPrefix: string, warnings: string[]): Git
       continue;
     }
 
-    if (shouldExtractTextFile(fileName) && uncompressedSize <= MAX_EXTRACTED_FILE_BYTES) {
+    if (!fileName.endsWith('/') && uncompressedSize <= MAX_EXTRACTED_FILE_BYTES) {
       try {
         if (localHeaderOffset + 30 > buffer.length || buffer.readUInt32LE(localHeaderOffset) !== 0x04034b50) {
           warnings.push(`Skipped malformed VSIX entry ${fileName}.`);
@@ -209,14 +179,16 @@ function extractZip(buffer: Buffer, pathPrefix: string, warnings: string[]): Git
           const contentBuffer = compression === 0
             ? compressed
             : compression === 8
-              ? inflateRawSync(compressed)
+              ? inflateRawSync(compressed, { maxOutputLength: MAX_EXTRACTED_FILE_BYTES })
               : null;
 
           if (contentBuffer) {
-            files.push({
+            if (contentBuffer.length > MAX_EXTRACTED_FILE_BYTES) throw new Error('VSIX entry exceeds the output limit');
+            const content = decodeTextContent(contentBuffer);
+            if (content !== null) files.push({
               name: basename(fileName),
               path: `${pathPrefix}/vsix/${fileName}`,
-              content: contentBuffer.toString('utf8'),
+              content,
             });
           } else {
             warnings.push(`Skipped VSIX entry ${fileName} with unsupported compression method ${compression}.`);
@@ -225,6 +197,8 @@ function extractZip(buffer: Buffer, pathPrefix: string, warnings: string[]): Git
       } catch {
         warnings.push(`Failed to decompress VSIX entry ${fileName}.`);
       }
+    } else if (!fileName.endsWith('/')) {
+      warnings.push(`Skipped VSIX entry ${fileName} larger than ${MAX_EXTRACTED_FILE_BYTES} bytes.`);
     }
 
     offset += 46 + fileNameLength + extraLength + commentLength;

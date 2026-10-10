@@ -1,30 +1,62 @@
 import { GitHubFile } from './types';
-import { IMPORTANT_FILES, MAX_FILE_BYTES, shouldScanFile, shouldSkipDirectory } from './files';
+import { IMPORTANT_FILES, MAX_FILE_BYTES, decodeTextContent, shouldSkipDirectory } from './files';
+import { GITHUB_HOSTS, SKILL_DIRECTORY_HOSTS, trustedHttpsUrl } from './urls';
 
 export class GitHubFetcher {
   private static readonly MAX_FILES = 50;
   private static readonly MAX_FILE_BYTES = MAX_FILE_BYTES;
   private static readonly IMPORTANT_FILES = IMPORTANT_FILES;
 
-  /**
-   * Convert ClawdHub/Molthub skill URLs to their GitHub source.
-   * e.g. https://clawdhub.com/skills/some-skill -> GitHub repo URL
-   */
-  private static convertClawdHubUrl(url: string): string {
-    // Convert ClawdHub URLs to GitHub URLs
-    // ClawdHub format: https://claudhub.ai/skills/username/skillname
-    // or https://molthub.ai/skills/username/skillname
-    
-    if (url.includes('claudhub.ai/skills/') || url.includes('molthub.ai/skills/')) {
-      // Extract username and repo name from ClawdHub URL
-      const match = url.match(/(?:claudhub|molthub)\.ai\/skills\/([^\/]+)\/([^\/\?]+)/);
-      if (match) {
-        const [, username, skillname] = match;
-        return `https://github.com/${username}/${skillname}`;
-      }
+  private static convertClawdHubUrl(input: string): string {
+    const url = trustedHttpsUrl(input, [...GITHUB_HOSTS, ...SKILL_DIRECTORY_HOSTS]);
+    if (SKILL_DIRECTORY_HOSTS.includes(url.hostname)) {
+      const parts = url.pathname.split('/');
+      if (parts[1] !== 'skills' || !parts[2] || !parts[3]) throw new Error('Invalid skill directory URL');
+      return `https://github.com/${parts[2]}/${parts[3]}`;
     }
-    
-    return url;
+    return url.href;
+  }
+
+  /** All GitHub requests share the credential boundary, including API-provided URLs. */
+  private static async request(input: string, api = false): Promise<Response> {
+    const url = trustedHttpsUrl(input, GITHUB_HOSTS);
+    const headers: Record<string, string> = { 'User-Agent': 'SkillScan-Security-Scanner/1.0' };
+    if (api) headers.Accept = 'application/vnd.github.v3+json';
+    if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+    // Redirects must not create another destination after validation.
+    return fetch(url.href, { headers, redirect: 'error' });
+  }
+
+  private static async readTextResponse(response: Response): Promise<string | null> {
+    if (Number(response.headers.get('content-length')) > this.MAX_FILE_BYTES) {
+      await response.body?.cancel();
+      throw new Error('File is too large to scan safely');
+    }
+    if (!response.body) return '';
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        size += value.length;
+        if (size > this.MAX_FILE_BYTES) {
+          await reader.cancel();
+          throw new Error('File is too large to scan safely');
+        }
+        chunks.push(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return decodeTextContent(bytes);
   }
 
   static async fetchRepo(url: string): Promise<GitHubFile[]> {
@@ -69,7 +101,7 @@ export class GitHubFetcher {
   static async fetchSingleFile(url: string): Promise<GitHubFile> {
     const convertedUrl = this.convertClawdHubUrl(url);
     const content = await this.fetchRawContent(convertedUrl);
-    const filename = convertedUrl.split('/').pop() || 'unknown';
+    const filename = new URL(convertedUrl).pathname.split('/').pop() || 'unknown';
     
     return {
       name: filename,
@@ -79,80 +111,46 @@ export class GitHubFetcher {
   }
 
   private static parseGitHubUrl(url: string): { owner: string; repo: string; branch: string } | null {
-    // Handle both github.com and raw.githubusercontent.com URLs
-    const githubMatch = url.match(/github\.com\/([^\/]+)\/([^\/]+)(?:\/(?:tree|blob)\/([^\/]+))?/);
-    const rawMatch = url.match(/raw\.githubusercontent\.com\/([^\/]+)\/([^\/]+)\/([^\/]+)/);
-    
-    if (githubMatch) {
-      return {
-        owner: githubMatch[1],
-        repo: githubMatch[2].replace(/\.git$/, ''),
-        branch: githubMatch[3] || 'main'
-      };
+    const parsed = trustedHttpsUrl(url, GITHUB_HOSTS);
+    const parts = parsed.pathname.split('/').slice(1);
+    const [owner, repo] = parts;
+    if (![owner, repo].every(part => part && /^[a-z0-9_.-]+$/i.test(part) && part !== '.' && part !== '..')) return null;
+    if (parsed.hostname === 'github.com') {
+      return { owner, repo: repo.replace(/\.git$/, ''), branch: ['tree', 'blob'].includes(parts[2]) ? parts[3] || 'main' : 'main' };
     }
-    
-    if (rawMatch) {
-      return {
-        owner: rawMatch[1],
-        repo: rawMatch[2],
-        branch: rawMatch[3]
-      };
+    if (parsed.hostname === 'raw.githubusercontent.com' && parts[2]) {
+      return { owner, repo, branch: parts[2] };
     }
-    
     return null;
   }
 
-  private static async fetchRawContent(url: string): Promise<string> {
-    // Convert GitHub URL to raw URL if needed
-    let rawUrl = url;
-    if (url.includes('github.com') && !url.includes('raw.githubusercontent.com')) {
-      rawUrl = url
-        .replace('github.com', 'raw.githubusercontent.com')
-        .replace('/blob/', '/');
+  private static async fetchRawContent(input: string): Promise<string> {
+    const url = trustedHttpsUrl(input, ['github.com', 'raw.githubusercontent.com']);
+    if (url.hostname === 'github.com') {
+      const parts = url.pathname.split('/');
+      if (parts[3] !== 'blob' || !parts[4] || !parts[5]) throw new Error('Expected a GitHub file URL');
+      url.hostname = 'raw.githubusercontent.com';
+      parts.splice(3, 1);
+      url.pathname = parts.join('/');
     }
-
-    const headers: Record<string, string> = {
-      'User-Agent': 'SkillScan-Security-Scanner/1.0'
-    };
-    const ghToken = process.env.GITHUB_TOKEN;
-    if (ghToken) {
-      headers['Authorization'] = `Bearer ${ghToken}`;
-    }
-
-      const response = await fetch(rawUrl, { headers });
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch file: ${response.statusText}`);
-    }
-
-    const contentLength = response.headers.get('content-length');
-    if (contentLength && Number(contentLength) > this.MAX_FILE_BYTES) {
-      throw new Error('File is too large to scan safely');
-    }
-
-    const text = await response.text();
-    return text.length > this.MAX_FILE_BYTES ? text.slice(0, this.MAX_FILE_BYTES) : text;
+    const response = await this.request(url.href);
+    if (!response.ok) throw new Error(`Failed to fetch file: ${response.statusText}`);
+    const text = await this.readTextResponse(response);
+    if (text === null) throw new Error('Binary file cannot be scanned as text');
+    return text;
   }
 
   private static async fetchRawFile(owner: string, repo: string, filename: string, branch: string = 'main'): Promise<string | null> {
     const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${filename}`;
     
     try {
-      const headers: Record<string, string> = {
-        'User-Agent': 'SkillScan-Security-Scanner/1.0'
-      };
-      const ghToken = process.env.GITHUB_TOKEN;
-      if (ghToken) {
-        headers['Authorization'] = `Bearer ${ghToken}`;
-      }
-
-      const response = await fetch(url, { headers });
+      const response = await this.request(url);
 
       if (!response.ok) {
         return null;
       }
 
-      return await response.text();
+      return await this.readTextResponse(response);
     } catch {
       return null;
     }
@@ -168,18 +166,7 @@ export class GitHubFetcher {
       const url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${branch}`;
       
       try {
-        const headers: Record<string, string> = {
-          'User-Agent': 'SkillScan-Security-Scanner/1.0',
-          'Accept': 'application/vnd.github.v3+json'
-        };
-        
-        // Use GitHub token if available (raises rate limit from 60 to 5000 req/hr)
-        const ghToken = process.env.GITHUB_TOKEN;
-        if (ghToken) {
-          headers['Authorization'] = `Bearer ${ghToken}`;
-        }
-
-        const response = await fetch(url, { headers });
+        const response = await GitHubFetcher.request(url, true);
 
         if (!response.ok) {
           console.error(`GitHub API error: ${response.status} ${response.statusText}`);
@@ -199,9 +186,7 @@ export class GitHubFetcher {
           visited.add(item.path);
 
           if (item.type === 'file') {
-            const shouldInclude = shouldScanFile(item.name);
-
-            if (shouldInclude && item.download_url) {
+            if (item.download_url) {
               try {
                 const content = await GitHubFetcher.fetchRawContent(item.download_url);
                 files.push({

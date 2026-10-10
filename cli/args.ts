@@ -16,6 +16,7 @@ export type CliCommand =
       failOn: FailOn;
       output?: string;
       verbose: boolean;
+      exclude: string[];
     };
 
 export class UsageError extends Error {}
@@ -42,6 +43,7 @@ Options:
   --fail-on <severity>  Exit 1 when any finding is at or above this severity:
                         critical (default, same as "block install"), high,
                         medium, low, info, or none (never fail on findings)
+  --exclude <glob>      Explicitly exclude a path glob (repeatable; *, **, ? supported)
   --verbose             Also list informational findings in text output
   -h, --help            Show this help
   -v, --version         Show the version
@@ -49,7 +51,7 @@ Options:
 Exit codes:
   0  No finding at or above --fail-on
   1  At least one finding at or above --fail-on (default: install blocked)
-  2  Usage error or the scan could not run`;
+  2  Usage error, runtime error, or incomplete scan`;
 
 export function parseCliArgs(argv: string[]): CliCommand {
   let parsed;
@@ -64,6 +66,7 @@ export function parseCliArgs(argv: string[]): CliCommand {
         output: { type: 'string', short: 'o' },
         'fail-on': { type: 'string' },
         verbose: { type: 'boolean' },
+        exclude: { type: 'string', multiple: true },
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
       },
@@ -104,5 +107,6 @@ export function parseCliArgs(argv: string[]): CliCommand {
     failOn: failOn as FailOn,
     output: values.output,
     verbose: values.verbose ?? false,
+    exclude: values.exclude ?? [],
   };
 }

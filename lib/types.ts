@@ -12,6 +12,7 @@ export interface ScanResult {
   fetchedAt?: string;
   partial?: boolean;
   scanWarnings?: string[];
+  excludedFiles?: number;
 }
 
 export interface Finding {

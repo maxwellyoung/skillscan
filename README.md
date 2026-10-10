@@ -148,7 +148,7 @@ Paste skill instructions, package manifests, extension manifests, GitHub Actions
 The `skillscan` CLI runs the same scanner as the web app and API (`lib/scanner.ts`), entirely offline for local paths. No AI, no account, and local files are never uploaded.
 
 ```bash
-npx @maxwellyoung/skillscan ./my-skill      # one-off run, Node.js 20+
+npx @maxwellyoung/skillscan ./my-skill      # one-off run, Node.js 20.3+
 npm install -g @maxwellyoung/skillscan      # or install the `skillscan` command
 ```
 
@@ -175,9 +175,24 @@ Local directories are walked recursively (skipping `node_modules` and `.git`, no
 | `--sarif` | SARIF 2.1.0 log: one rule per finding category, results with file/line/snippet locations and `security-severity` for code scanning |
 | `-o, --output <file>` | Write the report to a file; the human-readable report still goes to stdout |
 | `--fail-on <severity>` | `critical` (default, equivalent to the "block install" verdict), `high`, `medium`, `low`, `info`, or `none` |
+| `--exclude <glob>` | Explicitly exclude paths; repeatable, supports `*`, `**`, `?`; excluded counts are reported |
 | `--verbose` | Also list informational findings in text output |
 
-Exit codes: `0` nothing at or above `--fail-on`, `1` at least one finding at or above `--fail-on`, `2` usage error or the scan could not run.
+Exit codes: `0` nothing at or above `--fail-on`, `1` at least one finding at or above `--fail-on`, `2` usage/runtime error or incomplete coverage (even with `--fail-on none`).
+
+Partial scans never receive a PASS verdict. Remote requests have size limits, a
+45-second scan deadline, an 80-request ceiling, and a ten-second request timeout.
+GitHub uses the repository's default branch and supports slash-containing refs.
+Registry archive scans prioritize manifests and referenced entry points before
+applying the 40-file cap; warnings identify incomplete coverage.
+
+To exclude intentional test payloads, pass `--exclude 'test/**'`. Exclusions are
+explicit and visible in reports; repository-owned files cannot silently suppress
+findings. For local targets, globs match reported paths relative to the current
+working directory (or the target root when outside it).
+
+The public API has bounded bodies and best-effort limits per server instance.
+These limits do not constitute a shared fleet-wide rate limiter.
 
 ## GitHub Action
 
@@ -214,6 +229,7 @@ jobs:
 | `upload-sarif` | `false` | Upload via `github/codeql-action/upload-sarif` |
 | `category` | `skillscan` | Code scanning category for the upload |
 | `node-version` | `22` | Node.js used to run the scanner |
+| `exclude` | empty | Newline-separated explicit path globs, forwarded to `--exclude` |
 | `cli-source` | `source` | `source` runs the TypeScript CLI from the action checkout with `npx tsx@4.22.3`; `npm` runs the published `@maxwellyoung/skillscan` package |
 | `cli-version` | `0.1.0` | Exact package version used when `cli-source` is `npm` |
 
@@ -239,7 +255,7 @@ Checked against each project's own README, docs, and source on 2026-10-04. Cells
 | Official GitHub Action | Yes (`action.yml`) | No (`--ci` flag for CI use) | No |
 | Non-zero exit on findings | Yes (`--fail-on`) | Yes (exit 1 when risks remain in CI mode) | Unverified |
 | Runtime guard / proxy | No | Agent Guard hooks that forward events to Snyk Evo (enterprise) | No |
-| Language / install | TypeScript; `npx @maxwellyoung/skillscan` (Node.js 20+, not yet published) or from source | Python; `uvx snyk-agent-scan@latest` or standalone binaries | Python; `uv tool install cisco-ai-mcp-scanner` or pip |
+| Language / install | TypeScript; `npx @maxwellyoung/skillscan` (Node.js 20.3+, not yet published) or from source | Python; `uvx snyk-agent-scan@latest` or standalone binaries | Python; `uv tool install cisco-ai-mcp-scanner` or pip |
 | License | MIT | Apache-2.0 | Apache-2.0 |
 
 Where the others are stronger: both can inspect live MCP servers and their actual tool descriptions, Cisco's behavioral analyzer does cross-file dataflow for Python, and Snyk Agent Scan auto-discovers agent configs across many clients. SkillScan's patterns are regex heuristics, so expect false positives and sophisticated evasions to be missed.
@@ -331,7 +347,7 @@ See [CASE_STUDY.md](./CASE_STUDY.md) for the product framing, tradeoffs, and nex
 
 ## Tech Stack
 
-- **Next.js 14** - React framework with App Router
+- **Next.js 15** - React framework with App Router
 - **TypeScript** - Type safety
 - **Tailwind CSS** - Styling with custom dark theme
 - **Framer Motion** - Smooth animations

@@ -91,7 +91,7 @@ after(async () => {
 describe('CLI argument parsing', () => {
   it('defaults to text output and failing on critical findings', () => {
     assert.deepEqual(parseCliArgs(['./skill']), {
-      kind: 'scan', target: './skill', format: 'text', failOn: 'critical', output: undefined, verbose: false,
+      kind: 'scan', target: './skill', format: 'text', failOn: 'critical', output: undefined, verbose: false, exclude: [],
     });
   });
 
@@ -101,7 +101,7 @@ describe('CLI argument parsing', () => {
     assert.equal(json.kind === 'scan' && json.failOn, 'high');
 
     const sarif = parseCliArgs(['.', '--sarif', '-o', 'out.sarif', '--verbose', '--fail-on=none']);
-    assert.deepEqual(sarif, { kind: 'scan', target: '.', format: 'sarif', failOn: 'none', output: 'out.sarif', verbose: true });
+    assert.deepEqual(sarif, { kind: 'scan', target: '.', format: 'sarif', failOn: 'none', output: 'out.sarif', verbose: true, exclude: [] });
   });
 
   it('recognises help and version flags without a target', () => {

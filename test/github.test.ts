@@ -109,7 +109,7 @@ describe('GitHub fetch trust boundary', () => {
       cancel() { cancelled = true; },
     });
     t.mock.method(globalThis, 'fetch', async () => new Response(stream));
-    await assert.rejects(GitHubFetcher.fetchSingleFile('https://raw.githubusercontent.com/o/r/main/install'), /too large/);
+    await assert.rejects(GitHubFetcher.fetchSingleFile('https://raw.githubusercontent.com/o/r/main/install'), /size limit/);
     assert.equal(cancelled, true);
   });
 
@@ -122,6 +122,7 @@ describe('GitHub fetch trust boundary', () => {
       assert.ok(['raw.githubusercontent.com', 'api.github.com'].includes(url.hostname));
       assert.equal(init?.redirect, 'error');
       if (url.hostname === 'api.github.com') {
+        if (!url.pathname.includes('/contents')) return Response.json({ default_branch: 'main' });
         return Response.json([
           { type: 'file', name: 'install', path: 'install', download_url: 'https://raw.githubusercontent.com/o/r/main/install' },
           { type: 'file', name: 'guide.md', path: 'guide.md', download_url: 'https://raw.githubusercontent.com/o/r/main/guide.md' },
@@ -135,14 +136,16 @@ describe('GitHub fetch trust boundary', () => {
       return new Response('', { status: 404 });
     });
     const files = await GitHubFetcher.fetchRepo('https://github.com/o/r');
-    assert.deepEqual(files.map(file => file.name), ['install', 'guide.md']);
+    assert.deepEqual(files.map(file => file.name), ['guide.md', 'install']);
     assert.ok(requests.every(url => new URL(url).hostname !== '127.0.0.1'));
   });
 
   it('resolves every advertised skill directory alias without contacting the directory host', async t => {
     t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
       const url = new URL(String(input));
-      if (url.hostname === 'api.github.com') return Response.json([]);
+      if (url.hostname === 'api.github.com') return url.pathname.includes('/contents')
+        ? Response.json([{ type: 'file', name: 'SKILL.md', path: 'SKILL.md', download_url: 'https://raw.githubusercontent.com/owner/skill/main/SKILL.md' }])
+        : Response.json({ default_branch: 'main' });
       assert.equal(url.hostname, 'raw.githubusercontent.com');
       assert.match(url.pathname, /^\/owner\/skill\/main\//);
       return url.pathname.endsWith('/SKILL.md') ? new Response('# Skill') : new Response('', { status: 404 });

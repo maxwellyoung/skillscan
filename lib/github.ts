@@ -1,4 +1,5 @@
-import { GitHubFile } from './types';
+import { GitHubFile, FetchBundle } from './types';
+import { RemoteBudget, readBoundedJson, readBoundedResponse, trustedFetch } from './remote';
 import { IMPORTANT_FILES, MAX_FILE_BYTES, decodeTextContent, shouldSkipDirectory } from './files';
 import { GITHUB_HOSTS, SKILL_DIRECTORY_HOSTS, trustedHttpsUrl } from './urls';
 
@@ -18,89 +19,91 @@ export class GitHubFetcher {
   }
 
   /** All GitHub requests share the credential boundary, including API-provided URLs. */
-  private static async request(input: string, api = false): Promise<Response> {
+  private static async request(input: string, api = false, budget = new RemoteBudget()): Promise<Response> {
     const url = trustedHttpsUrl(input, GITHUB_HOSTS);
     const headers: Record<string, string> = { 'User-Agent': 'SkillScan-Security-Scanner/1.0' };
     if (api) headers.Accept = 'application/vnd.github.v3+json';
     if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
     // Redirects must not create another destination after validation.
-    return fetch(url.href, { headers, redirect: 'error' });
+    return trustedFetch(url.href, GITHUB_HOSTS, budget, { headers });
   }
 
   private static async readTextResponse(response: Response): Promise<string | null> {
-    if (Number(response.headers.get('content-length')) > this.MAX_FILE_BYTES) {
-      await response.body?.cancel();
-      throw new Error('File is too large to scan safely');
-    }
-    if (!response.body) return '';
-    const reader = response.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    try {
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        size += value.length;
-        if (size > this.MAX_FILE_BYTES) {
-          await reader.cancel();
-          throw new Error('File is too large to scan safely');
-        }
-        chunks.push(value);
-      }
-    } finally {
-      reader.releaseLock();
-    }
-    const bytes = new Uint8Array(size);
-    let offset = 0;
-    for (const chunk of chunks) {
-      bytes.set(chunk, offset);
-      offset += chunk.length;
-    }
-    return decodeTextContent(bytes);
+    return decodeTextContent(await readBoundedResponse(response, this.MAX_FILE_BYTES));
   }
 
   static async fetchRepo(url: string): Promise<GitHubFile[]> {
-    // Handle ClawdHub URLs by converting to GitHub
-    const convertedUrl = this.convertClawdHubUrl(url);
-    
-    const repoInfo = this.parseGitHubUrl(convertedUrl);
-    if (!repoInfo) {
-      throw new Error('Invalid GitHub or ClawdHub URL');
+    return (await this.fetchRepoBundle(url)).files;
+  }
+
+  static async fetchRepoBundle(input: string, budget = new RemoteBudget()): Promise<FetchBundle> {
+    const url = new URL(this.convertClawdHubUrl(input));
+    const parts = url.pathname.split('/').slice(1).map(decodeURIComponent);
+    const [owner, rawRepo] = parts;
+    const repo = rawRepo?.replace(/\.git$/, '');
+    if (url.hostname !== 'github.com' || ![owner, repo].every(p => p && /^[a-z0-9_.-]+$/i.test(p) && p !== '.' && p !== '..')) {
+      throw new Error('Invalid GitHub repository URL');
+    }
+    const base = `https://api.github.com/repos/${owner}/${repo}`;
+    let branch: string;
+    let rootPath = '';
+    if (parts.length > 2 && parts[2]) {
+      if (parts[2] !== 'tree' || !parts[3]) throw new Error('Expected a GitHub repository or tree URL');
+      const tail = parts.slice(3);
+      if (tail.length > 12) throw new Error('GitHub tree path is too deep');
+      branch = '';
+      for (let count = tail.length; count > 0; count -= 1) {
+        const candidate = tail.slice(0, count).join('/');
+        const response = await this.request(`${base}/commits/${encodeURIComponent(candidate)}`, true, budget);
+        if (response.ok) {
+          branch = candidate;
+          rootPath = tail.slice(count).join('/');
+          break;
+        }
+        if (response.status !== 404 && response.status !== 422) throw new Error(`GitHub ref lookup failed (${response.status})`);
+      }
+      if (!branch) throw new Error('GitHub branch or tag not found');
+    } else {
+      const response = await this.request(base, true, budget);
+      if (!response.ok) throw new Error(`GitHub repository lookup failed (${response.status})`);
+      const metadata = await readBoundedJson(response) as { default_branch?: string };
+      if (!metadata.default_branch) throw new Error('GitHub default branch unavailable');
+      branch = metadata.default_branch;
     }
 
     const files: GitHubFile[] = [];
-    
-    // First, try to fetch important files
-    for (const filename of this.IMPORTANT_FILES) {
-      try {
-        const content = await this.fetchRawFile(repoInfo.owner, repoInfo.repo, filename, repoInfo.branch);
-        if (content) {
-          files.push({
-            name: filename,
-            content,
-            path: filename
-          });
+    const warnings: string[] = [];
+    const visited = new Set<string>();
+    // Walk each path once; important files sort first rather than being fetched twice.
+    const walk = async (dir: string): Promise<void> => {
+      const response = await this.request(`${base}/contents/${dir.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(branch)}`, true, budget);
+      if (!response.ok) throw new Error(`GitHub directory lookup failed (${response.status})`);
+      const items = await readBoundedJson(response);
+      if (!Array.isArray(items)) throw new Error('Expected a GitHub directory listing');
+      const priority = (item: { name: string; type: string }) => this.IMPORTANT_FILES.includes(item.name) ? 0 : item.type === 'file' ? 1 : 2;
+      items.sort((a, b) => priority(a) - priority(b) || String(a.path).localeCompare(String(b.path)));
+      for (const item of items) {
+        if (files.length >= this.MAX_FILES) { warnings.push(`Stopped after ${this.MAX_FILES} GitHub text files.`); return; }
+        if (typeof item.path !== 'string' || typeof item.name !== 'string' || visited.has(item.path)) continue;
+        visited.add(item.path);
+        if (item.type === 'dir' && !shouldSkipDirectory(item.path)) {
+          try { await walk(item.path); } catch { warnings.push(`Directory ${item.path} could not be completely scanned.`); }
+        } else if (item.type === 'file' && item.download_url) {
+          try {
+            const content = await this.fetchRawContent(item.download_url, budget, true);
+            if (content !== null) files.push({ name: item.name, path: item.path, content });
+          } catch { warnings.push(`File ${item.path} could not be scanned within the remote limits.`); }
         }
-      } catch {
-        // File doesn't exist, continue
-        console.warn(`File ${filename} not found, skipping`);
       }
-    }
-
-    // Then fetch code files from the repository
-    try {
-      const repoFiles = await this.fetchRepoContents(repoInfo.owner, repoInfo.repo, repoInfo.branch);
-      files.push(...repoFiles.slice(0, this.MAX_FILES - files.length));
-    } catch (error) {
-      console.error('Failed to fetch repo contents:', error);
-    }
-
-    return files;
+    };
+    await walk(rootPath);
+    return { files, sourceType: 'github', fetchedAt: new Date().toISOString(), partial: warnings.length > 0, warnings: Array.from(new Set(warnings)) };
   }
 
-  static async fetchSingleFile(url: string): Promise<GitHubFile> {
+  static async fetchSingleFile(url: string, budget = new RemoteBudget()): Promise<GitHubFile> {
     const convertedUrl = this.convertClawdHubUrl(url);
-    const content = await this.fetchRawContent(convertedUrl);
+    const content = await this.fetchRawContent(convertedUrl, budget);
+    if (content === null) throw new Error('Binary file cannot be scanned as text');
     const filename = new URL(convertedUrl).pathname.split('/').pop() || 'unknown';
     
     return {
@@ -110,21 +113,7 @@ export class GitHubFetcher {
     };
   }
 
-  private static parseGitHubUrl(url: string): { owner: string; repo: string; branch: string } | null {
-    const parsed = trustedHttpsUrl(url, GITHUB_HOSTS);
-    const parts = parsed.pathname.split('/').slice(1);
-    const [owner, repo] = parts;
-    if (![owner, repo].every(part => part && /^[a-z0-9_.-]+$/i.test(part) && part !== '.' && part !== '..')) return null;
-    if (parsed.hostname === 'github.com') {
-      return { owner, repo: repo.replace(/\.git$/, ''), branch: ['tree', 'blob'].includes(parts[2]) ? parts[3] || 'main' : 'main' };
-    }
-    if (parsed.hostname === 'raw.githubusercontent.com' && parts[2]) {
-      return { owner, repo, branch: parts[2] };
-    }
-    return null;
-  }
-
-  private static async fetchRawContent(input: string): Promise<string> {
+  private static async fetchRawContent(input: string, budget: RemoteBudget, skipBinary = false): Promise<string | null> {
     const url = trustedHttpsUrl(input, ['github.com', 'raw.githubusercontent.com']);
     if (url.hostname === 'github.com') {
       const parts = url.pathname.split('/');
@@ -133,81 +122,11 @@ export class GitHubFetcher {
       parts.splice(3, 1);
       url.pathname = parts.join('/');
     }
-    const response = await this.request(url.href);
+    const response = await this.request(url.href, false, budget);
     if (!response.ok) throw new Error(`Failed to fetch file: ${response.statusText}`);
     const text = await this.readTextResponse(response);
-    if (text === null) throw new Error('Binary file cannot be scanned as text');
+    if (text === null && !skipBinary) throw new Error('Binary file cannot be scanned as text');
     return text;
   }
 
-  private static async fetchRawFile(owner: string, repo: string, filename: string, branch: string = 'main'): Promise<string | null> {
-    const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${filename}`;
-    
-    try {
-      const response = await this.request(url);
-
-      if (!response.ok) {
-        return null;
-      }
-
-      return await this.readTextResponse(response);
-    } catch {
-      return null;
-    }
-  }
-
-  private static async fetchRepoContents(owner: string, repo: string, branch: string = 'main'): Promise<GitHubFile[]> {
-    const files: GitHubFile[] = [];
-    const visited = new Set<string>();
-
-    async function fetchDirectory(path: string = ''): Promise<void> {
-      if (files.length >= GitHubFetcher.MAX_FILES) return;
-
-      const url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${branch}`;
-      
-      try {
-        const response = await GitHubFetcher.request(url, true);
-
-        if (!response.ok) {
-          console.error(`GitHub API error: ${response.status} ${response.statusText}`);
-          return;
-        }
-
-        const contents = await response.json();
-        
-        if (!Array.isArray(contents)) {
-          return;
-        }
-
-        for (const item of contents) {
-          if (files.length >= GitHubFetcher.MAX_FILES) break;
-          if (visited.has(item.path)) continue;
-          
-          visited.add(item.path);
-
-          if (item.type === 'file') {
-            if (item.download_url) {
-              try {
-                const content = await GitHubFetcher.fetchRawContent(item.download_url);
-                files.push({
-                  name: item.name,
-                  content,
-                  path: item.path
-                });
-              } catch (error) {
-                console.error(`Failed to fetch ${item.path}:`, error);
-              }
-            }
-          } else if (item.type === 'dir' && !shouldSkipDirectory(item.path)) {
-            await fetchDirectory(item.path);
-          }
-        }
-      } catch (error) {
-        console.error(`Failed to fetch directory ${path}:`, error);
-      }
-    }
-
-    await fetchDirectory();
-    return files;
-  }
 }

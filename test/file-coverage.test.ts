@@ -162,4 +162,23 @@ describe('text file coverage and Markdown evasion', () => {
       assert.ok(!bundle.files.some(file => /\/(tarball|vsix)\//.test(file.path)));
     }
   });
+  it('finds entrypoint payloads placed after benign archive padding', async t => {
+    const entries: Array<[string, Uint8Array]> = Array.from({ length: 60 }, (_, i) => [`package/a${i}.md`, Buffer.from('# Safe')]);
+    entries.push(['package/package.json', Buffer.from(JSON.stringify({ name: 'padding', main: 'z.payload', bin: { tool: 'run' } }))]);
+    entries.push(['package/z.payload', Buffer.from(PAYLOAD)], ['package/run', Buffer.from(PAYLOAD)]);
+    t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('registry.npmjs.org/padding') && !url.endsWith('.tgz')) return Response.json({ 'dist-tags': { latest: '1' }, versions: { '1': { dist: { tarball: 'https://registry.npmjs.org/padding.tgz' } } } });
+      if (url.endsWith('.tgz')) return new Response(new Uint8Array(tar(entries)));
+      if (url.includes('/api/')) return Response.json({ files: { download: 'https://open-vsx.org/padding.vsix' } });
+      return new Response(new Uint8Array(zip(entries)));
+    });
+    for (const bundle of [await RegistryFetcher.fetchNpm('npm:padding'), await RegistryFetcher.fetchOpenVsx('https://open-vsx.org/extension/example/padding')]) {
+      assert.equal(bundle.partial, true);
+      assert.ok(bundle.files.some(file => file.name === 'z.payload'));
+      assert.ok(bundle.files.some(file => file.name === 'run'));
+      assert.equal((await new SecurityScanner().scan(bundle.files)).riskLevel, 'block');
+    }
+  });
+
 });

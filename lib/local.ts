@@ -1,6 +1,6 @@
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { open, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { MAX_FILE_BYTES, shouldScanFile, shouldSkipDirectory } from './files';
+import { MAX_FILE_BYTES, decodeTextContent, shouldSkipDirectory } from './files';
 import type { FetchBundle, GitHubFile } from './types';
 
 export const MAX_LOCAL_FILES = 2_000;
@@ -9,15 +9,33 @@ function toPosix(p: string): string {
   return p.split(path.sep).join('/');
 }
 
-async function readScannable(absolutePath: string, relativePath: string, warnings: string[]): Promise<GitHubFile> {
-  const buffer = await readFile(absolutePath);
-  if (buffer.length > MAX_FILE_BYTES) {
+async function readScannable(absolutePath: string, relativePath: string, warnings: string[]): Promise<GitHubFile | null> {
+  const handle = await open(absolutePath, 'r');
+  let buffer: Buffer;
+  let truncated: boolean;
+  try {
+    const info = await handle.stat();
+    truncated = info.size > MAX_FILE_BYTES;
+    const bytes = Buffer.alloc(Math.min(info.size, MAX_FILE_BYTES));
+    let offset = 0;
+    while (offset < bytes.length) {
+      const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
+      if (!bytesRead) break;
+      offset += bytesRead;
+    }
+    buffer = bytes.subarray(0, offset);
+  } finally {
+    await handle.close();
+  }
+  const content = decodeTextContent(buffer, truncated);
+  if (content === null) return null;
+  if (truncated) {
     warnings.push(`${relativePath} is larger than ${MAX_FILE_BYTES} bytes; only the first ${MAX_FILE_BYTES} bytes were scanned.`);
   }
   return {
     name: path.basename(absolutePath),
     path: relativePath,
-    content: buffer.subarray(0, MAX_FILE_BYTES).toString('utf8'),
+    content,
   };
 }
 
@@ -25,7 +43,7 @@ async function readScannable(absolutePath: string, relativePath: string, warning
  * Load a local skill folder, MCP server checkout, extension folder, or single file
  * into the same shape the remote fetchers produce. Uses the shared file-selection
  * rules so local scans match GitHub scans of the same tree. An explicitly named
- * file is always scanned, whatever its extension.
+ * text file is scanned regardless of its extension; binaries are skipped.
  */
 export async function loadLocalTarget(target: string): Promise<FetchBundle> {
   const root = path.resolve(target);
@@ -43,6 +61,7 @@ export async function loadLocalTarget(target: string): Promise<FetchBundle> {
 
   if (rootStat.isFile()) {
     const file = await readScannable(root, toPosix(path.relative(base, root)), warnings);
+    if (!file) throw new Error('Binary file cannot be scanned as text');
     return { files: [file], sourceType: 'local', fetchedAt, partial: warnings.length > 0, warnings };
   }
 
@@ -67,8 +86,9 @@ export async function loadLocalTarget(target: string): Promise<FetchBundle> {
 
       if (entry.isDirectory()) {
         if (!shouldSkipDirectory(toPosix(path.relative(root, absolute)))) await walk(absolute);
-      } else if (entry.isFile() && shouldScanFile(entry.name)) {
-        files.push(await readScannable(absolute, relative, warnings));
+      } else if (entry.isFile()) {
+        const file = await readScannable(absolute, relative, warnings);
+        if (file) files.push(file);
       }
       // Symlinks are not followed so a scan cannot escape the target directory.
     }

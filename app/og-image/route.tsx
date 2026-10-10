@@ -11,47 +11,26 @@ export async function GET() {
           width: '100%',
           display: 'flex',
           flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          backgroundColor: 'hsl(220, 15%, 4%)',
-          fontSize: 32,
-          fontWeight: 600,
+          justifyContent: 'space-between',
+          padding: '72px 80px',
+          backgroundColor: '#000000',
+          color: 'rgba(255,255,255,0.9)',
         }}
       >
-        <div
-          style={{
-            background: 'linear-gradient(90deg, hsl(355, 78%, 58%) 0%, hsl(355, 78%, 70%) 100%)',
-            backgroundClip: 'text',
-            WebkitBackgroundClip: 'text',
-            color: 'transparent',
-            fontSize: 72,
-            fontWeight: 300,
-            marginBottom: 24,
-            letterSpacing: '-0.02em',
-          }}
-        >
-          SkillScan
+        <div style={{ display: 'flex', fontSize: 28, fontWeight: 500, letterSpacing: '-0.01em' }}>SkillScan</div>
+
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', fontSize: 84, fontWeight: 300, letterSpacing: '-0.03em', color: '#ffffff', lineHeight: 1.05 }}>
+            Know what you&apos;re installing.
+          </div>
+          <div style={{ display: 'flex', marginTop: 28, fontSize: 30, lineHeight: 1.4, color: 'rgba(255,255,255,0.55)', maxWidth: 900 }}>
+            Static security checks for agent skills, MCP servers, npm packages, VS Code extensions, and GitHub Actions.
+          </div>
         </div>
-        <div
-          style={{
-            color: 'hsl(0, 0%, 90%)',
-            fontSize: 32,
-            marginBottom: 16,
-            textAlign: 'center',
-            maxWidth: 800,
-          }}
-        >
-          Security Scanner for AI Skills & Code
-        </div>
-        <div
-          style={{
-            color: 'hsl(220, 15%, 60%)',
-            fontSize: 24,
-            textAlign: 'center',
-            maxWidth: 600,
-          }}
-        >
-          Scan Claude Code skills and repositories for security vulnerabilities
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 24, color: 'rgba(255,255,255,0.45)' }}>
+          <div style={{ display: 'flex' }}>Web · npm CLI · GitHub Action</div>
+          <div style={{ display: 'flex' }}>skillscan.ninetynine.digital</div>
         </div>
       </div>
     ),

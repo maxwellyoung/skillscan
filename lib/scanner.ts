@@ -38,8 +38,8 @@ const SHA_PIN = /^[a-f0-9]{40}$/i;
 /**
  * SkillScan Security Scanner v2
  * 
- * Key improvement: distinguishes between executable code and documentation.
- * Markdown files with code examples are NOT treated the same as real .js/.ts files.
+ * Documentation keeps low-confidence mentions informational, but explicit
+ * remote execution and secret-transmission flows are scanned in every text file.
  */
 export class SecurityScanner {
   private findings: Finding[] = [];
@@ -206,9 +206,10 @@ export class SecurityScanner {
     // Docs mentioning "API key" is normal documentation, not theft
     if (!isDoc) {
       this.checkApiTokenStealing(content, file, lines);
-      this.checkSecretExfiltrationFlow(content, file, lines);
-      this.checkPersistenceAndSystemModification(content, file, lines);
     }
+    // Agents consume documentation as instructions, including fenced examples.
+    this.checkSecretExfiltrationFlow(content, file, lines);
+    this.checkPersistenceAndSystemModification(content, file, lines);
 
     // 10. Credential patterns (hardcoded secrets — check all files)
     this.checkCredentialPatterns(content, file, lines);
@@ -217,7 +218,7 @@ export class SecurityScanner {
     this.checkSuspiciousUrls(content, file, lines);
 
     // 12. Skill and agent instruction analysis
-    if (this.isInstructionFile(file.name)) {
+    if (isDoc) {
       this.checkSkillInstructions(content, file, lines);
     }
 
@@ -307,7 +308,7 @@ export class SecurityScanner {
 
   private checkFileSystemAccess(content: string, file: GitHubFile, lines: string[]): void {
     const patterns = [
-      /fs\.(?:readFile|writeFile|readdir|mkdir|rmdir|unlink|stat|access|createReadStream|createWriteStream)/g,
+      /\bfs\.(?:readFile|writeFile|readdir|mkdir|rmdir|unlink|stat|access|createReadStream|createWriteStream)(?:Sync)?\s*\(/g,
       /path\.(?:join|resolve).*\.\./g,
     ];
 
@@ -691,7 +692,7 @@ export class SecurityScanner {
         remediation: 'Avoid curl-pipe-shell patterns. Pin, verify, and inspect downloaded artifacts before execution.'
       },
       {
-        pattern: /github\.com\/[^/\s]+\/[^/\s]+\/releases\/download\/[^\s]+|\bbun(?:-linux|-darwin|-windows)?\b|router_runtime\.js|execution\.js/gi,
+        pattern: /(?:(?:curl|wget)\b[^\n]*|(?:fetch|axios\.(?:get|request)|https?\.(?:get|request))\s*\(\s*['"`])https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/releases\/download\/[^\s'"`]+/gi,
         category: 'Runtime Downloader',
         title: 'Incident-style runtime downloader detected',
         severity: 'critical',
@@ -720,7 +721,8 @@ export class SecurityScanner {
         const snippet = lines[lineNumber - 1]?.trim();
 
         this.addFinding({
-          severity: rule.severity,
+          severity: this.isDocFile(file.name) && !['Remote Code Execution', 'Runtime Downloader'].includes(rule.category)
+            ? this.adjustSeverity(rule.severity, file, match.index) : rule.severity,
           category: rule.category,
           title: rule.title,
           description: 'Code contains behavior commonly associated with persistence, destructive modification, or remote code execution.',
@@ -731,17 +733,6 @@ export class SecurityScanner {
         });
       }
     }
-  }
-
-  private isInstructionFile(fileName: string): boolean {
-    const base = fileName.split('/').pop()?.toLowerCase() ?? '';
-    return base === 'skill.md' ||
-      base === 'agents.md' ||
-      base === 'claude.md' ||
-      base === 'readme.md' ||
-      base?.endsWith('.skill.md') ||
-      base?.endsWith('.agents.md') ||
-      base?.endsWith('.claude.md');
   }
 
   private isExtractedArtifactFile(file: GitHubFile): boolean {
@@ -1225,6 +1216,20 @@ export class SecurityScanner {
 
   private looksLikeTyposquat(packageName: string, dependencyName: string): boolean {
     if (!packageName || !dependencyName) return false;
+    // Family packages extend a name at a delimiter (eslint -> eslint-scope, react -> react-dom);
+    // typosquats are near-miss spellings of it, so only undelimited overlaps count.
+    const bare = (value: string) => value.replace(/^@[^/]+\//, '').toLowerCase();
+    const extendsAtDelimiter = (longer: string, shorter: string) =>
+      longer.length > shorter.length && (
+        (longer.startsWith(shorter) && /[-_.]/.test(longer[shorter.length])) ||
+        (longer.endsWith(shorter) && /[-_.]/.test(longer[longer.length - shorter.length - 1]))
+      );
+    const [a, b] = [bare(packageName), bare(dependencyName)];
+    if (extendsAtDelimiter(a, b) || extendsAtDelimiter(b, a)) return false;
+    // npm scopes are owned, so a dependency under the package's own name or scope is first-party.
+    const scopeOf = (value: string) => value.match(/^@([^/]+)\//)?.[1]?.toLowerCase();
+    const depScope = scopeOf(dependencyName);
+    if (depScope && (depScope === a || depScope === scopeOf(packageName))) return false;
     const normalize = (value: string) => value.replace(/^@[^/]+\//, '').replace(/[-_.]/g, '').toLowerCase();
     const pkg = normalize(packageName);
     const dep = normalize(dependencyName);

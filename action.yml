@@ -10,6 +10,10 @@ inputs:
     description: 'Local path or supported URL to scan (GitHub, ClawdHub/Molthub, npm, OpenVSX).'
     required: false
     default: '.'
+  exclude:
+    description: 'Newline-separated path globs to explicitly exclude from the scan scope.'
+    required: false
+    default: ''
   fail-on:
     description: 'Fail when any finding is at or above this severity: critical (same as "block install"), high, medium, low, info, or none.'
     required: false
@@ -31,9 +35,9 @@ inputs:
     required: false
     default: '22'
   cli-source:
-    description: 'Where the scanner comes from: "source" runs the TypeScript CLI from this action checkout with tsx; "npm" runs the published @maxwellyoung/skillscan package at cli-version. Defaults to "source" until the package is published.'
+    description: 'Where the scanner comes from: "source" runs the TypeScript CLI from this action checkout with tsx; "npm" runs the published @maxwellyoung/skillscan package at cli-version. Defaults to the published, pinned npm release.'
     required: false
-    default: 'source'
+    default: 'npm'
   cli-version:
     description: 'Exact @maxwellyoung/skillscan version used when cli-source is "npm".'
     required: false
@@ -60,6 +64,7 @@ runs:
       shell: bash
       env:
         SKILLSCAN_TARGET: ${{ inputs.path }}
+        SKILLSCAN_EXCLUDE: ${{ inputs.exclude }}
         SKILLSCAN_FAIL_ON: ${{ inputs.fail-on }}
         SKILLSCAN_SARIF: ${{ inputs.sarif-file }}
         SKILLSCAN_CLI_SOURCE: ${{ inputs.cli-source }}
@@ -67,6 +72,9 @@ runs:
       run: |
         set +e
         args=("$SKILLSCAN_TARGET" --sarif --output "$SKILLSCAN_SARIF" --fail-on "$SKILLSCAN_FAIL_ON")
+        while IFS= read -r pattern; do
+          [ -z "$pattern" ] || args+=(--exclude "$pattern")
+        done <<< "$SKILLSCAN_EXCLUDE"
         case "$SKILLSCAN_CLI_SOURCE" in
           npm)
             # The published package is a single bundled file with no dependencies.
@@ -97,6 +105,7 @@ runs:
       shell: bash
       env:
         SKILLSCAN_EXIT: ${{ steps.scan.outputs.exit-code }}
+        SKILLSCAN_EXCLUDE: ${{ inputs.exclude }}
         SKILLSCAN_FAIL_ON: ${{ inputs.fail-on }}
       run: |
         if [ "$SKILLSCAN_EXIT" = "1" ]; then

@@ -122,7 +122,7 @@ export function toSarif(result: ScanResult, options: SarifOptions) {
             },
           };
         }),
-        invocations: [{ executionSuccessful: true }],
+        invocations: [{ executionSuccessful: !result.partial }],
         properties: {
           score: result.score,
           grade: result.grade,
@@ -130,6 +130,7 @@ export function toSarif(result: ScanResult, options: SarifOptions) {
           severityCounts: result.severityCounts,
           scannedFiles: result.scannedFiles,
           partial: result.partial ?? false,
+          excludedFiles: result.excludedFiles ?? 0,
           ...(result.scanWarnings?.length ? { scanWarnings: result.scanWarnings } : {}),
         },
       },

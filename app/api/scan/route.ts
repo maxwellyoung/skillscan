@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchRemoteTarget, TargetError } from '@/lib/targets';
 import { SecurityScanner } from '@/lib/scanner';
-import { ScanRequest, GitHubFile } from '@/lib/types';
-import type { ScanResult } from '@/lib/types';
+import { ScanRequest, FetchBundle } from '@/lib/types';
+import { readBoundedResponse } from '@/lib/remote';
+import { withCoverage } from '@/lib/coverage';
+import { admitScan } from '@/lib/rate-limit';
 
 function inferPastedFileName(code: string): string {
   const trimmed = code.trim();
@@ -34,85 +36,41 @@ function inferPastedFileName(code: string): string {
   return 'code.ts';
 }
 
+export const maxDuration = 60;
+
 export async function POST(request: NextRequest) {
+  let release: (() => void) | null = null;
   try {
-    const body: ScanRequest = await request.json();
+    let body: ScanRequest;
+    try {
+      const bytes = await readBoundedResponse(new Response(request.body, { headers: request.headers }), 220_000, AbortSignal.timeout(5_000));
+      const value: unknown = JSON.parse(new TextDecoder().decode(bytes));
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid body');
+      body = value as ScanRequest;
+      if ((body.code !== undefined && typeof body.code !== 'string') || (body.url !== undefined && typeof body.url !== 'string')) throw new Error('Invalid fields');
+    } catch (error) {
+      const oversized = error instanceof Error && error.message.includes('size limit');
+      return NextResponse.json({ error: oversized ? 'Request body is too large' : 'Provide a JSON object with a string code or url' }, { status: oversized ? 413 : 400 });
+    }
     const url = body.url?.trim();
     const code = body.code?.trim();
-    let sourceType: ScanResult['sourceType'] = code ? 'code' : undefined;
-    let fetchedAt: string | undefined;
-    let partial = false;
-    let scanWarnings: string[] = [];
-    
-    if (!code && !url) {
-      return NextResponse.json(
-        { error: 'Either code or url must be provided' },
-        { status: 400 }
-      );
+    if ((!code && !url) || (code && url)) return NextResponse.json({ error: 'Provide exactly one of code or url' }, { status: 400 });
+    if ((code && code.length > 200_000) || (url && url.length > 2048)) return NextResponse.json({ error: 'Input is too large' }, { status: 413 });
+    const key = request.headers.get('x-real-ip') || 'unknown';
+    release = admitScan(key, Boolean(url));
+    if (!release) return NextResponse.json({ error: 'Scan limit reached. Try again in a minute.' }, { status: 429, headers: { 'Retry-After': '60' } });
+    let bundle: FetchBundle;
+    if (url) bundle = await fetchRemoteTarget(url, request.signal);
+    else {
+      const name = inferPastedFileName(code!);
+      bundle = { files: [{ name, content: code!, path: name }], sourceType: 'code', fetchedAt: new Date().toISOString(), partial: false, warnings: [] };
     }
-
-    if (code && code.length > 200_000) {
-      return NextResponse.json(
-        { error: 'Code input is too large. Scan a GitHub URL or keep pasted code under 200KB.' },
-        { status: 413 }
-      );
-    }
-
-    let files: GitHubFile[] = [];
-
-    if (url) {
-      try {
-        const bundle = await fetchRemoteTarget(url);
-        files = bundle.files;
-        sourceType = bundle.sourceType;
-        fetchedAt = bundle.fetchedAt;
-        partial = bundle.partial;
-        scanWarnings = bundle.warnings;
-      } catch (error) {
-        if (error instanceof TargetError) {
-          return NextResponse.json({ error: error.message }, { status: 400 });
-        }
-        throw error;
-      }
-    }
-
-    if (code) {
-      const name = inferPastedFileName(code);
-      sourceType = 'code';
-      fetchedAt = new Date().toISOString();
-      files = [{
-        name,
-        content: code,
-        path: name
-      }];
-    }
-
-    if (files.length === 0) {
-      return NextResponse.json(
-        { error: 'No files found to scan' },
-        { status: 400 }
-      );
-    }
-
-    // Perform security scan
-    const scanner = new SecurityScanner();
-    const result = await scanner.scan(files);
-
-    return NextResponse.json({
-      ...result,
-      sourceType,
-      fetchedAt,
-      partial,
-      scanWarnings,
-    });
-
+    if (!bundle.files.length) return NextResponse.json({ error: 'No files found to scan' }, { status: 400 });
+    return NextResponse.json(withCoverage(await new SecurityScanner().scan(bundle.files), bundle));
   } catch (error) {
-    console.error('Scan error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
-  }
+    if (error instanceof TargetError) return NextResponse.json({ error: error.message }, { status: 400 });
+    return NextResponse.json({ error: 'Scan failed' }, { status: 500 });
+  } finally { release?.(); }
 }
 
 export async function GET() {

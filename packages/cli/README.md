@@ -5,7 +5,7 @@ Static, zero-AI security scanner for Claude Code skills, MCP servers, npm packag
 Local paths are scanned entirely offline: no AI, no account, and nothing is uploaded. The package is one bundled file with no runtime dependencies.
 
 ```bash
-npx @maxwellyoung/skillscan ./my-skill          # Node.js 20+
+npx @maxwellyoung/skillscan ./my-skill          # Node.js 20.3+
 npm install -g @maxwellyoung/skillscan          # installs the `skillscan` command
 ```
 
@@ -25,9 +25,10 @@ skillscan https://open-vsx.org/extension/publisher/name
 | `--sarif` | SARIF 2.1.0 log with `security-severity` for code scanning |
 | `-o, --output <file>` | Write the report to a file; the human-readable report still goes to stdout |
 | `--fail-on <severity>` | `critical` (default, the "block install" verdict), `high`, `medium`, `low`, `info`, or `none` |
+| `--exclude <glob>` | Explicitly exclude paths; repeatable, supports `*`, `**`, `?`; excluded counts are reported |
 | `--verbose` | Also list informational findings in text output |
 
-Exit codes: `0` nothing at or above `--fail-on`, `1` at least one finding at or above `--fail-on`, `2` usage error or the scan could not run.
+Exit codes: `0` nothing at or above `--fail-on`, `1` at least one finding at or above `--fail-on`, `2` usage/runtime error or incomplete coverage (even with `--fail-on none`).
 
 The rules are regex and heuristic checks, so expect some false positives, and sophisticated evasions can be missed. Treat a pass as "nothing obvious found", not as proof of safety.
 

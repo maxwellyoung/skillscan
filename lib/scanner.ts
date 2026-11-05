@@ -750,9 +750,17 @@ export class SecurityScanner {
       // so setup prose, the description or a "Token maintenance" heading can't stand in as the evidence.
       const secret = /api[_ -]?key|token|secret|password|process\.env|environment variable|credential/i;
       const outbound = /\b(?:send|post|upload|transmit|curl|fetch)\b|webhook|discord\.com\/api\/webhooks|hooks\.slack\.com|exfiltrat/i;
-      const lineNumber = this.findSkillBodyLine(lines, line => secret.test(line) && outbound.test(line))
+      const nextNonBlank = (i: number) => lines.slice(i + 1).find(line => line.trim() !== '') ?? '';
+      // A hand-wrapped sentence can put the secret and the sending verb on adjacent lines; quote both.
+      const wrappedAt = this.findSkillBodyLine(lines, (line, i) => secret.test(line) && outbound.test(nextNonBlank(i)));
+      const sameLineAt = this.findSkillBodyLine(lines, line => secret.test(line) && outbound.test(line));
+      const lineNumber = sameLineAt ?? wrappedAt
         ?? this.findSkillBodyLine(lines, line => secret.test(line))
         ?? this.findFirstMatchingLine(lines, /read|collect|steal|extract|exfiltrate|grab|dump|webhook|secret|token|process\.env/i);
+      const quotesWrapped = sameLineAt === undefined && lineNumber === wrappedAt;
+      const evidence = quotesWrapped
+        ? lines.slice(lineNumber - 1, lines.indexOf(nextNonBlank(lineNumber - 1), lineNumber) + 1).map(line => line.trim()).join('\n')
+        : lines[lineNumber - 1]?.trim();
       this.addFinding({
         severity: 'critical',
         category: 'Malicious Skill Instructions',
@@ -760,7 +768,7 @@ export class SecurityScanner {
         description: 'The skill instructions request dangerous capabilities while discussing secret access and outbound transmission.',
         file: file.name,
         line: lineNumber,
-        snippet: lines[lineNumber - 1]?.trim(),
+        snippet: evidence,
         remediation: 'Reject this skill unless the requested capabilities are minimized and the outbound behavior is removed or fully justified.'
       });
     }
@@ -813,21 +821,17 @@ export class SecurityScanner {
         if (scripts[hook]) {
           const script = String(scripts[hook]);
           const severity: Severity = this.isDangerousLifecycleScript(script) ? 'critical' : 'medium';
-          // Give the finding the hook's real line, but only a line holding this key *and* the parsed
-          // script, so a same-named config key or a duplicate key can't stand in as the evidence.
-          const sourceLines = content.split('\n');
-          const encoded = JSON.stringify(script);
-          const hookIndex = sourceLines.findIndex(line => line.includes(`"${hook}"`) && line.includes(encoded));
-          // A minified manifest is one long line: keep its line number but quote just the hook.
-          const quoteSourceLine = hookIndex >= 0 && sourceLines[hookIndex].length <= 300;
+          // Quote the effective scripts.<hook> property verbatim from the source, with its real line.
+          // Unlocatable (e.g. unusual JSON) means no line rather than a guessed one.
+          const located = locateScriptsHook(content, hook);
           this.addFinding({
             severity,
             category: 'Install Hooks',
             title: `${hook} script detected`,
             description: 'Package has install/uninstall hooks that run automatically during npm operations.',
             file: file.name,
-            line: hookIndex >= 0 ? hookIndex + 1 : undefined,
-            snippet: quoteSourceLine ? sourceLines[hookIndex].trim().replace(/,$/, '') : `"${hook}": ${encoded}`,
+            line: located?.line,
+            snippet: located?.text ?? `"${hook}": ${JSON.stringify(script)}`,
             remediation: severity === 'critical'
               ? 'Remove network, shell, or filesystem-modifying behavior from lifecycle scripts before installation.'
               : 'Review install hook scripts to ensure they perform only necessary setup tasks.'
@@ -1196,14 +1200,14 @@ export class SecurityScanner {
   }
 
   /** First line passing `matches` after any leading `---` frontmatter block, or undefined. */
-  private findSkillBodyLine(lines: string[], matches: (line: string) => boolean): number | undefined {
+  private findSkillBodyLine(lines: string[], matches: (line: string, index: number) => boolean): number | undefined {
     let start = 0;
     if (lines[0]?.trim() === '---') {
       const end = lines.findIndex((line, i) => i > 0 && line.trim() === '---');
       if (end > 0) start = end + 1;
     }
     for (let i = start; i < lines.length; i++) {
-      if (matches(lines[i])) return i + 1;
+      if (matches(lines[i], i)) return i + 1;
     }
     return undefined;
   }
@@ -1361,4 +1365,39 @@ export class SecurityScanner {
     
     return 'No significant security issues detected. Appears safe to install.';
   }
+}
+
+/**
+ * Find the effective `scripts.<hook>` property in package.json source: the last occurrence
+ * inside the top-level `scripts` object (JSON.parse keeps the last duplicate). Returns its
+ * 1-based line and the verbatim `"hook": "value"` text, or undefined if it can't be located.
+ */
+export function locateScriptsHook(source: string, hook: string): { line: number; text: string } | undefined {
+  let depth = 0;
+  let scriptsDepth = -1;
+  let found: { start: number; end: number } | undefined;
+  const readString = (from: number) => {
+    let i = from + 1;
+    while (i < source.length && source[i] !== '"') i += source[i] === '\\' ? 2 : 1;
+    return i; // index of the closing quote
+  };
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    if (ch === '{' || ch === '[') { depth++; continue; }
+    if (ch === '}' || ch === ']') { if (depth === scriptsDepth) scriptsDepth = -1; depth--; continue; }
+    if (ch !== '"') continue;
+    const close = readString(i);
+    const key = source.slice(i + 1, close);
+    const after = source.slice(close + 1).match(/^\s*:/);
+    if (after) {
+      if (depth === 1 && key === 'scripts' && /^\s*:\s*\{/.test(source.slice(close + 1))) scriptsDepth = depth + 1;
+      else if (depth === scriptsDepth && key === hook) {
+        const valueStart = source.indexOf('"', close + 1 + after[0].length);
+        if (valueStart >= 0) found = { start: i, end: readString(valueStart) + 1 };
+      }
+    }
+    i = close;
+  }
+  if (!found) return undefined;
+  return { line: source.slice(0, found.start).split('\n').length, text: source.slice(found.start, found.end) };
 }

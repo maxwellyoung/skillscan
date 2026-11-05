@@ -746,7 +746,10 @@ export class SecurityScanner {
       /(?:send|post|upload|transmit|webhook|discord\.com\/api\/webhooks|hooks\.slack\.com|curl|fetch|exfiltrat)[\s\S]{0,220}(?:api[_ -]?key|token|secret|password|process\.env|environment variable|credential)/i.test(content);
 
     if (asksForDangerousTools && exfiltrationInstruction) {
-      const lineNumber = this.findFirstMatchingLine(lines, /read|collect|steal|extract|exfiltrate|grab|dump|webhook|secret|token|process\.env/i);
+      // Point at the instruction itself, not the tool list (whose "Read" also matches).
+      const isToolDeclaration = /^\s*(?:allowed-tools|tools|permissions)\s*[:=-]/i;
+      const evidenceIndex = lines.findIndex(line => !isToolDeclaration.test(line) && /read|collect|steal|extract|exfiltrate|grab|dump|webhook|secret|token|process\.env/i.test(line));
+      const lineNumber = evidenceIndex >= 0 ? evidenceIndex + 1 : this.findFirstMatchingLine(lines, /read|collect|steal|extract|exfiltrate|grab|dump|webhook|secret|token|process\.env/i);
       this.addFinding({
         severity: 'critical',
         category: 'Malicious Skill Instructions',

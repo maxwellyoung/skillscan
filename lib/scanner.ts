@@ -746,10 +746,10 @@ export class SecurityScanner {
       /(?:send|post|upload|transmit|webhook|discord\.com\/api\/webhooks|hooks\.slack\.com|curl|fetch|exfiltrat)[\s\S]{0,220}(?:api[_ -]?key|token|secret|password|process\.env|environment variable|credential)/i.test(content);
 
     if (asksForDangerousTools && exfiltrationInstruction) {
-      // Point at the instruction itself, not the tool list (whose "Read" also matches).
-      const isToolDeclaration = /^\s*(?:allowed-tools|tools|permissions)\s*[:=-]/i;
-      const evidenceIndex = lines.findIndex(line => !isToolDeclaration.test(line) && /read|collect|steal|extract|exfiltrate|grab|dump|webhook|secret|token|process\.env/i.test(line));
-      const lineNumber = evidenceIndex >= 0 ? evidenceIndex + 1 : this.findFirstMatchingLine(lines, /read|collect|steal|extract|exfiltrate|grab|dump|webhook|secret|token|process\.env/i);
+      // Point at the instruction that touches a secret, outside the frontmatter, so the quote
+      // is the evidence rather than the tool list, the description or a "Read this first" heading.
+      const lineNumber = this.findSkillBodyLine(lines, /api[_ -]?key|token|secret|password|process\.env|environment variable|credential/i)
+        ?? this.findFirstMatchingLine(lines, /read|collect|steal|extract|exfiltrate|grab|dump|webhook|secret|token|process\.env/i);
       this.addFinding({
         severity: 'critical',
         category: 'Malicious Skill Instructions',
@@ -810,13 +810,17 @@ export class SecurityScanner {
         if (scripts[hook]) {
           const script = String(scripts[hook]);
           const severity: Severity = this.isDangerousLifecycleScript(script) ? 'critical' : 'medium';
+          // Quote the hook's own line from the file when we can find it, so the finding has a real location.
+          const sourceLines = content.split('\n');
+          const hookIndex = sourceLines.findIndex(line => new RegExp(`"${hook}"\\s*:`).test(line));
           this.addFinding({
             severity,
             category: 'Install Hooks',
             title: `${hook} script detected`,
             description: 'Package has install/uninstall hooks that run automatically during npm operations.',
             file: file.name,
-            snippet: `"${hook}": "${script}"`,
+            line: hookIndex >= 0 ? hookIndex + 1 : undefined,
+            snippet: hookIndex >= 0 ? sourceLines[hookIndex].trim().replace(/,$/, '') : `"${hook}": "${script}"`,
             remediation: severity === 'critical'
               ? 'Remove network, shell, or filesystem-modifying behavior from lifecycle scripts before installation.'
               : 'Review install hook scripts to ensure they perform only necessary setup tasks.'
@@ -1182,6 +1186,19 @@ export class SecurityScanner {
 
   private getLineNumber(content: string, index: number): number {
     return content.substring(0, index).split('\n').length;
+  }
+
+  /** First line matching `pattern` after any leading `---` frontmatter block, or undefined. */
+  private findSkillBodyLine(lines: string[], pattern: RegExp): number | undefined {
+    let start = 0;
+    if (lines[0]?.trim() === '---') {
+      const end = lines.findIndex((line, i) => i > 0 && line.trim() === '---');
+      if (end > 0) start = end + 1;
+    }
+    for (let i = start; i < lines.length; i++) {
+      if (pattern.test(lines[i])) return i + 1;
+    }
+    return undefined;
   }
 
   private findFirstMatchingLine(lines: string[], pattern: RegExp): number {

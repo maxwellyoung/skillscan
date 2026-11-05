@@ -545,7 +545,7 @@ function Results({ result }: { result: ScanResult }) {
                                   {finding.snippet.split('\n').map((line, k) => (
                                     <div key={k} className="flex">
                                       {firstLine !== null && <span className="ln shrink-0">{firstLine + k}</span>}
-                                      <span className="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]">{line}</span>
+                                      <span className="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]">{line || '\u00a0'}</span>
                                     </div>
                                   ))}
                                 </code>

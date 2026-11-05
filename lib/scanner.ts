@@ -746,9 +746,12 @@ export class SecurityScanner {
       /(?:send|post|upload|transmit|webhook|discord\.com\/api\/webhooks|hooks\.slack\.com|curl|fetch|exfiltrat)[\s\S]{0,220}(?:api[_ -]?key|token|secret|password|process\.env|environment variable|credential)/i.test(content);
 
     if (asksForDangerousTools && exfiltrationInstruction) {
-      // Point at the instruction that touches a secret, outside the frontmatter, so the quote
-      // is the evidence rather than the tool list, the description or a "Read this first" heading.
-      const lineNumber = this.findSkillBodyLine(lines, /api[_ -]?key|token|secret|password|process\.env|environment variable|credential/i)
+      // Quote the instruction that both touches a secret and sends something, after the frontmatter,
+      // so setup prose, the description or a "Token maintenance" heading can't stand in as the evidence.
+      const secret = /api[_ -]?key|token|secret|password|process\.env|environment variable|credential/i;
+      const outbound = /\b(?:send|post|upload|transmit|curl|fetch)\b|webhook|discord\.com\/api\/webhooks|hooks\.slack\.com|exfiltrat/i;
+      const lineNumber = this.findSkillBodyLine(lines, line => secret.test(line) && outbound.test(line))
+        ?? this.findSkillBodyLine(lines, line => secret.test(line))
         ?? this.findFirstMatchingLine(lines, /read|collect|steal|extract|exfiltrate|grab|dump|webhook|secret|token|process\.env/i);
       this.addFinding({
         severity: 'critical',
@@ -810,9 +813,13 @@ export class SecurityScanner {
         if (scripts[hook]) {
           const script = String(scripts[hook]);
           const severity: Severity = this.isDangerousLifecycleScript(script) ? 'critical' : 'medium';
-          // Quote the hook's own line from the file when we can find it, so the finding has a real location.
+          // Give the finding the hook's real line, but only a line holding this key *and* the parsed
+          // script, so a same-named config key or a duplicate key can't stand in as the evidence.
           const sourceLines = content.split('\n');
-          const hookIndex = sourceLines.findIndex(line => new RegExp(`"${hook}"\\s*:`).test(line));
+          const encoded = JSON.stringify(script);
+          const hookIndex = sourceLines.findIndex(line => line.includes(`"${hook}"`) && line.includes(encoded));
+          // A minified manifest is one long line: keep its line number but quote just the hook.
+          const quoteSourceLine = hookIndex >= 0 && sourceLines[hookIndex].length <= 300;
           this.addFinding({
             severity,
             category: 'Install Hooks',
@@ -820,7 +827,7 @@ export class SecurityScanner {
             description: 'Package has install/uninstall hooks that run automatically during npm operations.',
             file: file.name,
             line: hookIndex >= 0 ? hookIndex + 1 : undefined,
-            snippet: hookIndex >= 0 ? sourceLines[hookIndex].trim().replace(/,$/, '') : `"${hook}": "${script}"`,
+            snippet: quoteSourceLine ? sourceLines[hookIndex].trim().replace(/,$/, '') : `"${hook}": ${encoded}`,
             remediation: severity === 'critical'
               ? 'Remove network, shell, or filesystem-modifying behavior from lifecycle scripts before installation.'
               : 'Review install hook scripts to ensure they perform only necessary setup tasks.'
@@ -1188,15 +1195,15 @@ export class SecurityScanner {
     return content.substring(0, index).split('\n').length;
   }
 
-  /** First line matching `pattern` after any leading `---` frontmatter block, or undefined. */
-  private findSkillBodyLine(lines: string[], pattern: RegExp): number | undefined {
+  /** First line passing `matches` after any leading `---` frontmatter block, or undefined. */
+  private findSkillBodyLine(lines: string[], matches: (line: string) => boolean): number | undefined {
     let start = 0;
     if (lines[0]?.trim() === '---') {
       const end = lines.findIndex((line, i) => i > 0 && line.trim() === '---');
       if (end > 0) start = end + 1;
     }
     for (let i = start; i < lines.length; i++) {
-      if (pattern.test(lines[i])) return i + 1;
+      if (matches(lines[i])) return i + 1;
     }
     return undefined;
   }

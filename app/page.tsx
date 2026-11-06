@@ -551,7 +551,7 @@ function Results({ result }: { result: ScanResult }) {
                                 <code className="block text-[12px] text-white/70">
                                   {finding.snippet.split('\n').map((line, k) => (
                                     <div key={k} className="flex">
-                                      {firstLine !== null && <span className="ln shrink-0">{firstLine + k}</span>}
+                                      <span className="ln shrink-0" aria-hidden={firstLine === null || undefined}>{firstLine !== null ? firstLine + k : ''}</span>
                                       <span className="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]">{line || '\u00a0'}</span>
                                     </div>
                                   ))}

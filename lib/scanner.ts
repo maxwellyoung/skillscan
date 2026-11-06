@@ -1203,19 +1203,38 @@ export class SecurityScanner {
       const close = lines.findIndex((line, i) => i > 0 && line.trim() === '---');
       if (close > 0) bodyStart = close + 1;
     }
-    const isToolAt = (i: number) => i < bodyStart && isTool(lines[i]);
+    // In frontmatter, a tool key and any "- item" list lines under it are the tool list.
+    const toolLine: boolean[] = lines.map(() => false);
+    let inToolList = false;
+    for (let i = 0; i < bodyStart; i++) {
+      if (isTool(lines[i])) { toolLine[i] = true; inToolList = true; continue; }
+      inToolList = inToolList && /^\s+-\s|^\s*-\s/.test(lines[i]);
+      toolLine[i] = inToolList;
+    }
+    const isToolAt = (i: number) => toolLine[i];
     // Fences close only on the same character, at least as long, with nothing after it
     // (CommonMark), so a ``` line inside a ```` block, or ~~~ inside ```, stays inside.
     const fenced: boolean[] = [];
-    let fence: { char: string; length: number } | undefined;
-    for (const line of lines) {
-      // Fences can sit inside blockquotes and list items, so look past > and list markers.
+    let fence: { char: string; length: number; quoted: boolean; indent: number } | undefined;
+    for (const raw of lines) {
       // CRLF files keep a trailing \r on each line; drop it so fences are still recognised.
-      const marker = line.replace(/\r$/, '').match(/^[ \t>]*(?:(?:[-*+]|\d+[.)])[ \t]+)?(`{3,}|~{3,})(.*)$/);
-      if (!fence && marker && !(marker[1][0] === '`' && marker[2].includes('`'))) {
-        fence = { char: marker[1][0], length: marker[1].length };
+      const line = raw.replace(/\r$/, '');
+      // A fence opened inside a blockquote or list item ends with its container.
+      if (fence && line.trim() !== '') {
+        const quoteEnded = fence.quoted && !/^\s*>/.test(line);
+        const dedented = !fence.quoted && (line.match(/^ */)?.[0].length ?? 0) < fence.indent;
+        if (quoteEnded || dedented) fence = undefined;
+      }
+      // Fences can sit inside blockquotes and list items, so look past > and list markers.
+      const m = line.match(/^([ \t>]*(?:(?:[-*+]|\d+[.)])[ \t]+)?)(`{3,}|~{3,})(.*)$/);
+      const prefix = m?.[1] ?? '';
+      const mark = m?.[2];
+      const info = m?.[3] ?? '';
+      if (!fence && mark && !(mark[0] === '`' && info.includes('`'))) {
+        const quoted = prefix.includes('>');
+        fence = { char: mark[0], length: mark.length, quoted, indent: quoted ? 0 : prefix.length };
         fenced.push(true);
-      } else if (fence && marker && marker[1][0] === fence.char && marker[1].length >= fence.length && marker[2].trim() === '') {
+      } else if (fence && mark && mark[0] === fence.char && mark.length >= fence.length && info.trim() === '') {
         fence = undefined;
         fenced.push(true);
       } else {
@@ -1255,12 +1274,17 @@ export class SecurityScanner {
       }
       return undefined;
     };
-    const instruction = (isSecret: (line: string) => boolean) => {
+    // Scope is the outer priority: the unfenced body (key-shaped secrets, then any secret) before
+    // frontmatter or fenced examples, so docs examples never outrank a real body instruction.
+    const inBody = (isSecret: (line: string) => boolean) => {
       secretNow = isSecret;
-      return search(bodyStart, true, same) ?? search(bodyStart, true, forward) ?? search(bodyStart, true, reverse)
-        ?? search(0, false, same) ?? search(0, false, forward) ?? search(0, false, reverse);
+      return search(bodyStart, true, same) ?? search(bodyStart, true, forward) ?? search(bodyStart, true, reverse);
     };
-    const span = instruction(keyShaped) ?? instruction(anySecret)
+    const anywhere = (isSecret: (line: string) => boolean) => {
+      secretNow = isSecret;
+      return search(0, false, same) ?? search(0, false, forward) ?? search(0, false, reverse);
+    };
+    const span = inBody(keyShaped) ?? inBody(anySecret) ?? anywhere(keyShaped) ?? anywhere(anySecret)
       ?? search(bodyStart, true, secretOnly) ?? search(0, false, secretOnly);
     if (!span) return undefined;
     return { line: span[0] + 1, text: lines.slice(span[0], span[1] + 1).map(line => line.trim()).join('\n') };

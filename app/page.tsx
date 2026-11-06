@@ -86,10 +86,13 @@ export default function Home() {
   const resultsRef = useRef<HTMLDivElement>(null);
   // Each scan gets an id so a slow response can't attach its verdict to newer input.
   const scanIdRef = useRef(0);
+  // Abandoned scans are aborted so they stop using the server's concurrency and rate limits.
+  const scanAbortRef = useRef<AbortController | null>(null);
 
   // A verdict only describes the input it scanned: drop it (and any pending scan) when the input changes.
   const changeInput = (value: string) => {
     scanIdRef.current += 1;
+    scanAbortRef.current?.abort();
     setInput(value);
     setResult(null);
     setError(null);
@@ -108,6 +111,9 @@ export default function Home() {
   const scan = async () => {
     if (!input.trim() || scanning) return;
     const scanId = ++scanIdRef.current;
+    scanAbortRef.current?.abort();
+    const controller = new AbortController();
+    scanAbortRef.current = controller;
     setScanning(true);
     setError(null);
     setResult(null);
@@ -120,6 +126,7 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ [type]: value }),
+        signal: controller.signal,
       });
       const data = await res.json();
       if (scanId !== scanIdRef.current) return;

@@ -750,17 +750,27 @@ export class SecurityScanner {
       // so setup prose, the description or a "Token maintenance" heading can't stand in as the evidence.
       const secret = /api[_ -]?key|token|secret|password|process\.env|environment variable|credential/i;
       const outbound = /\b(?:send|post|upload|transmit|curl|fetch)\b|webhook|discord\.com\/api\/webhooks|hooks\.slack\.com|exfiltrat/i;
-      const nextNonBlank = (i: number) => lines.slice(i + 1).find(line => line.trim() !== '') ?? '';
+      // The next non-blank line, if it's within two lines: a wrapped sentence, not a later paragraph.
+      const nextNonBlank = (i: number) => lines.slice(i + 1, i + 3).find(line => line.trim() !== '') ?? '';
       // A hand-wrapped sentence can put the secret and the sending verb on adjacent lines; quote both.
       const wrappedAt = this.findSkillBodyLine(lines, (line, i) => secret.test(line) && outbound.test(nextNonBlank(i)));
       const sameLineAt = this.findSkillBodyLine(lines, line => secret.test(line) && outbound.test(line));
+      // Body first; then anywhere, including frontmatter fields an agent also reads (description:),
+      // but never the tool list itself. With no such line, the finding has no line rather than a guess.
+      const anywhere = (matches: (line: string) => boolean) => {
+        const index = lines.findIndex(line => !/^\s*(?:allowed-tools|tools|permissions)\s*[:=-]/i.test(line) && matches(line));
+        return index >= 0 ? index + 1 : undefined;
+      };
       const lineNumber = sameLineAt ?? wrappedAt
         ?? this.findSkillBodyLine(lines, line => secret.test(line))
-        ?? this.findFirstMatchingLine(lines, /read|collect|steal|extract|exfiltrate|grab|dump|webhook|secret|token|process\.env/i);
-      const quotesWrapped = sameLineAt === undefined && lineNumber === wrappedAt;
-      const evidence = quotesWrapped
-        ? lines.slice(lineNumber - 1, lines.indexOf(nextNonBlank(lineNumber - 1), lineNumber) + 1).map(line => line.trim()).join('\n')
-        : lines[lineNumber - 1]?.trim();
+        ?? anywhere(line => secret.test(line) && outbound.test(line))
+        ?? anywhere(line => secret.test(line));
+      const quotesWrapped = lineNumber !== undefined && sameLineAt === undefined && lineNumber === wrappedAt;
+      const evidence = lineNumber === undefined
+        ? undefined
+        : quotesWrapped
+          ? lines.slice(lineNumber - 1, lines.indexOf(nextNonBlank(lineNumber - 1), lineNumber) + 1).map(line => line.trim()).join('\n')
+          : lines[lineNumber - 1]?.trim();
       this.addFinding({
         severity: 'critical',
         category: 'Malicious Skill Instructions',
@@ -1387,13 +1397,19 @@ export function locateScriptsHook(source: string, hook: string): { line: number;
     if (ch === '}' || ch === ']') { if (depth === scriptsDepth) scriptsDepth = -1; depth--; continue; }
     if (ch !== '"') continue;
     const close = readString(i);
-    const key = source.slice(i + 1, close);
+    // Decode the key as JSON.parse would, so "post\u0069nstall" is the same key as "postinstall".
+    let key: string;
+    try { key = JSON.parse(source.slice(i, close + 1)); } catch { key = source.slice(i + 1, close); }
     const after = source.slice(close + 1).match(/^\s*:/);
     if (after) {
-      if (depth === 1 && key === 'scripts' && /^\s*:\s*\{/.test(source.slice(close + 1))) scriptsDepth = depth + 1;
-      else if (depth === scriptsDepth && key === hook) {
-        const valueStart = source.indexOf('"', close + 1 + after[0].length);
-        if (valueStart >= 0) found = { start: i, end: readString(valueStart) + 1 };
+      if (depth === 1 && key === 'scripts') {
+        // A later top-level "scripts" replaces an earlier one, so only its hooks count.
+        found = undefined;
+        if (/^\s*:\s*\{/.test(source.slice(close + 1))) scriptsDepth = depth + 1;
+      } else if (depth === scriptsDepth && key === hook) {
+        // Only a string value can be quoted verbatim; anything else isn't located.
+        const value = source.slice(close + 1).match(/^\s*:\s*"/);
+        found = value ? { start: i, end: readString(close + value[0].length) + 1 } : undefined;
       }
     }
     i = close;

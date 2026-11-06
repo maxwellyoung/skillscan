@@ -1210,7 +1210,8 @@ export class SecurityScanner {
     let fence: { char: string; length: number } | undefined;
     for (const line of lines) {
       // Fences can sit inside blockquotes and list items, so look past > and list markers.
-      const marker = line.match(/^[ \t>]*(?:(?:[-*+]|\d+[.)])[ \t]+)?(`{3,}|~{3,})(.*)$/);
+      // CRLF files keep a trailing \r on each line; drop it so fences are still recognised.
+      const marker = line.replace(/\r$/, '').match(/^[ \t>]*(?:(?:[-*+]|\d+[.)])[ \t]+)?(`{3,}|~{3,})(.*)$/);
       if (!fence && marker && !(marker[1][0] === '`' && marker[2].includes('`'))) {
         fence = { char: marker[1][0], length: marker[1].length };
         fenced.push(true);
@@ -1227,16 +1228,21 @@ export class SecurityScanner {
     };
     type Span = [number, number];
     // Key-shaped secrets (GITHUB_TOKEN, process.env, an API key) outrank the bare word "token" in prose.
-    const keyShaped = /[A-Z][A-Z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD)\b|process\.env|api[_ -]?key|credential|password/;
-    let secretNow = secret;
-    const same = (i: number): Span | undefined => (secretNow.test(lines[i]) && outbound.test(lines[i]) ? [i, i] : undefined);
+    // Env-style names stay case-sensitive (so "token" in prose doesn't count); the words don't.
+    const envName = /[A-Z][A-Z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD)\b/;
+    const keyWord = /process\.env|api[_ -]?key|credential|password/i;
+    const keyShaped = (line: string) => envName.test(line) || keyWord.test(line);
+    const anySecret = (line: string) => secret.test(line);
+    let secretNow = anySecret;
+    const same = (i: number): Span | undefined => (secretNow(lines[i]) && outbound.test(lines[i]) ? [i, i] : undefined);
     // Secret-then-send pairs are searched before send-then-secret ones, so a line that merely
     // mentions sending doesn't capture the real instruction below it.
     const pairIn = (reverse: boolean) => (i: number): Span | undefined => {
       const j = next(i);
       if (j < 0 || isToolAt(j)) return undefined;
-      const [first, second] = reverse ? [outbound, secretNow] : [secretNow, outbound];
-      return first.test(lines[i]) && second.test(lines[j]) ? [i, j] : undefined;
+      const sends = (line: string) => outbound.test(line);
+      const [first, second] = reverse ? [sends, secretNow] : [secretNow, sends];
+      return first(lines[i]) && second(lines[j]) ? [i, j] : undefined;
     };
     const forward = pairIn(false);
     const reverse = pairIn(true);
@@ -1249,12 +1255,12 @@ export class SecurityScanner {
       }
       return undefined;
     };
-    const instruction = (pattern: RegExp) => {
-      secretNow = pattern;
+    const instruction = (isSecret: (line: string) => boolean) => {
+      secretNow = isSecret;
       return search(bodyStart, true, same) ?? search(bodyStart, true, forward) ?? search(bodyStart, true, reverse)
         ?? search(0, false, same) ?? search(0, false, forward) ?? search(0, false, reverse);
     };
-    const span = instruction(keyShaped) ?? instruction(secret)
+    const span = instruction(keyShaped) ?? instruction(anySecret)
       ?? search(bodyStart, true, secretOnly) ?? search(0, false, secretOnly);
     if (!span) return undefined;
     return { line: span[0] + 1, text: lines.slice(span[0], span[1] + 1).map(line => line.trim()).join('\n') };

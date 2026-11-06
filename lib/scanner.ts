@@ -749,7 +749,8 @@ export class SecurityScanner {
       // Quote the instruction that both touches a secret and sends something, after the frontmatter,
       // so setup prose, the description or a "Token maintenance" heading can't stand in as the evidence.
       const secret = /api[_ -]?key|token|secret|password|process\.env|environment variable|credential/i;
-      const outbound = /\b(?:send|post|upload|transmit|curl|fetch)\b|webhook|discord\.com\/api\/webhooks|hooks\.slack\.com|exfiltrat/i;
+      // Inflections count too ("sends", "posting", "uploaded"), as they do in detection.
+      const outbound = /\b(?:send|post|upload|transmit|transmitt|curl|fetch)(?:s|es|ed|ing)?\b|webhook|discord\.com\/api\/webhooks|hooks\.slack\.com|exfiltrat/i;
       // The next non-blank line, if it's within two lines: a wrapped sentence, not a later paragraph.
       const nextNonBlank = (i: number) => lines.slice(i + 1, i + 3).find(line => line.trim() !== '') ?? '';
       // A hand-wrapped sentence can put the secret and the sending verb on adjacent lines; quote both.
@@ -761,9 +762,11 @@ export class SecurityScanner {
         const index = lines.findIndex(line => !/^\s*(?:allowed-tools|tools|permissions)\s*[:=-]/i.test(line) && matches(line));
         return index >= 0 ? index + 1 : undefined;
       };
+      // Any line that both touches a secret and sends (a frontmatter description included) beats
+      // body prose that only mentions one.
       const lineNumber = sameLineAt ?? wrappedAt
-        ?? this.findSkillBodyLine(lines, line => secret.test(line))
         ?? anywhere(line => secret.test(line) && outbound.test(line))
+        ?? this.findSkillBodyLine(lines, line => secret.test(line))
         ?? anywhere(line => secret.test(line));
       const quotesWrapped = lineNumber !== undefined && sameLineAt === undefined && lineNumber === wrappedAt;
       const evidence = lineNumber === undefined

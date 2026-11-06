@@ -1194,18 +1194,6 @@ export class SecurityScanner {
     return content.substring(0, index).split('\n').length;
   }
 
-  /** First line passing `matches` after any leading `---` frontmatter block, or undefined. */
-  private findSkillBodyLine(lines: string[], matches: (line: string, index: number) => boolean): number | undefined {
-    let start = 0;
-    if (lines[0]?.trim() === '---') {
-      const end = lines.findIndex((line, i) => i > 0 && line.trim() === '---');
-      if (end > 0) start = end + 1;
-    }
-    for (let i = start; i < lines.length; i++) {
-      if (matches(lines[i], i)) return i + 1;
-    }
-    return undefined;
-  }
 
   /** See the Malicious Skill Instructions rule: locate the instruction span used as evidence. */
   private findInstructionSpan(lines: string[], secret: RegExp, outbound: RegExp): { line: number; text: string } | undefined {
@@ -1215,11 +1203,22 @@ export class SecurityScanner {
       const close = lines.findIndex((line, i) => i > 0 && line.trim() === '---');
       if (close > 0) bodyStart = close + 1;
     }
+    const isToolAt = (i: number) => i < bodyStart && isTool(lines[i]);
+    // Fences close only on the same character, at least as long, with nothing after it
+    // (CommonMark), so a ``` line inside a ```` block, or ~~~ inside ```, stays inside.
     const fenced: boolean[] = [];
-    let open = false;
+    let fence: { char: string; length: number } | undefined;
     for (const line of lines) {
-      if (/^\s*(?:```|~~~)/.test(line)) { fenced.push(true); open = !open; continue; }
-      fenced.push(open);
+      const marker = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+      if (!fence && marker && !(marker[1][0] === '`' && marker[2].includes('`'))) {
+        fence = { char: marker[1][0], length: marker[1].length };
+        fenced.push(true);
+      } else if (fence && marker && marker[1][0] === fence.char && marker[1].length >= fence.length && marker[2].trim() === '') {
+        fence = undefined;
+        fenced.push(true);
+      } else {
+        fenced.push(Boolean(fence));
+      }
     }
     const next = (i: number) => {
       for (let j = i + 1; j <= i + 2 && j < lines.length; j++) if (lines[j].trim() !== '') return j;
@@ -1229,7 +1228,7 @@ export class SecurityScanner {
     const same = (i: number): Span | undefined => (secret.test(lines[i]) && outbound.test(lines[i]) ? [i, i] : undefined);
     const pair = (i: number): Span | undefined => {
       const j = next(i);
-      if (j < 0 || isTool(lines[j])) return undefined;
+      if (j < 0 || isToolAt(j)) return undefined;
       const forward = secret.test(lines[i]) && outbound.test(lines[j]);
       const reverse = outbound.test(lines[i]) && secret.test(lines[j]);
       return forward || reverse ? [i, j] : undefined;
@@ -1237,7 +1236,7 @@ export class SecurityScanner {
     const secretOnly = (i: number): Span | undefined => (secret.test(lines[i]) ? [i, i] : undefined);
     const search = (from: number, skipFenced: boolean, match: (i: number) => Span | undefined) => {
       for (let i = from; i < lines.length; i++) {
-        if (isTool(lines[i]) || (skipFenced && fenced[i])) continue;
+        if (isToolAt(i) || (skipFenced && fenced[i])) continue;
         const span = match(i);
         if (span) return span;
       }

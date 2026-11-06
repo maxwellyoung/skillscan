@@ -84,6 +84,20 @@ export default function Home() {
   const [focused, setFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
+  // Each scan gets an id so a slow response can't attach its verdict to newer input.
+  const scanIdRef = useRef(0);
+  // Abandoned scans are aborted so they stop using the server's concurrency and rate limits.
+  const scanAbortRef = useRef<AbortController | null>(null);
+
+  // A verdict only describes the input it scanned: drop it (and any pending scan) when the input changes.
+  const changeInput = (value: string) => {
+    scanIdRef.current += 1;
+    scanAbortRef.current?.abort();
+    setInput(value);
+    setResult(null);
+    setError(null);
+    setScanning(false);
+  };
 
   // On short viewports the verdict renders below the fold; bring it into view once.
   useEffect(() => {
@@ -96,6 +110,10 @@ export default function Home() {
 
   const scan = async () => {
     if (!input.trim() || scanning) return;
+    const scanId = ++scanIdRef.current;
+    scanAbortRef.current?.abort();
+    const controller = new AbortController();
+    scanAbortRef.current = controller;
     setScanning(true);
     setError(null);
     setResult(null);
@@ -108,14 +126,17 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ [type]: value }),
+        signal: controller.signal,
       });
       const data = await res.json();
+      if (scanId !== scanIdRef.current) return;
       if (!res.ok) throw new Error(data.error || 'Scan failed');
       setResult(data);
     } catch (err) {
+      if (scanId !== scanIdRef.current) return;
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
-      setScanning(false);
+      if (scanId === scanIdRef.current) setScanning(false);
     }
   };
 
@@ -169,7 +190,7 @@ export default function Home() {
                 <textarea
                   ref={textareaRef}
                   value={input}
-                  onChange={(e) => setInput(e.target.value)}
+                  onChange={(e) => changeInput(e.target.value)}
                   onFocus={() => setFocused(true)}
                   onBlur={() => setFocused(false)}
                   aria-label="URL or code to scan"
@@ -201,9 +222,7 @@ export default function Home() {
                     key={ex.label}
                     type="button"
                     onClick={() => {
-                      setInput(ex.value);
-                      setResult(null);
-                      setError(null);
+                      changeInput(ex.value);
                       textareaRef.current?.focus();
                     }}
                     className="pressable min-h-8 rounded-md px-2 text-white/60 hover:text-white/90 hover:bg-white/[0.05]"
@@ -514,7 +533,8 @@ function Results({ result }: { result: ScanResult }) {
                     <ul className="space-y-5 pb-5 pl-4">
                       {findings.map((finding, j) => {
                         const where = location(finding);
-                        const firstLine = finding.line && finding.line > 0 ? finding.line : 1;
+                        // Only number snippet lines when the scanner knows where they are.
+                        const firstLine = finding.line && finding.line > 0 ? finding.line : null;
                         return (
                           <li key={`${where ?? ''}-${j}`} className="min-w-0 space-y-2">
                             <div>
@@ -525,18 +545,20 @@ function Results({ result }: { result: ScanResult }) {
                               <p className="mt-0.5 text-[12.5px] text-white/50 leading-relaxed">{finding.description}</p>
                             </div>
 
-                            {finding.snippet && (
+                            {finding.snippet ? (
                               <div className="code-block">
                                 {where && <div className="mb-1.5 font-sans text-[11px] text-white/45 break-all">{where}</div>}
                                 <code className="block text-[12px] text-white/70">
                                   {finding.snippet.split('\n').map((line, k) => (
-                                    <div key={k} className="whitespace-pre">
-                                      <span className="ln">{firstLine + k}</span>
-                                      {line}
+                                    <div key={k} className="flex">
+                                      {firstLine !== null && <span className="ln shrink-0">{firstLine + k}</span>}
+                                      <span className="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]">{line || '\u00a0'}</span>
                                     </div>
                                   ))}
                                 </code>
                               </div>
+                            ) : (
+                              where && <div className="font-sans text-[11px] text-white/45 break-all">{where}</div>
                             )}
 
                             {finding.remediation && (

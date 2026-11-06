@@ -67,7 +67,8 @@ export class SecurityScanner {
     this.findings.sort((a, b) => {
       const severityDelta = severityRank[a.severity] - severityRank[b.severity];
       if (severityDelta !== 0) return severityDelta;
-      return `${a.file ?? ''}:${a.line ?? 0}`.localeCompare(`${b.file ?? ''}:${b.line ?? 0}`);
+      // Numeric line order: line 6 before line 10.
+      return (a.file ?? '').localeCompare(b.file ?? '') || (a.line ?? 0) - (b.line ?? 0);
     });
     const severityCounts = this.calculateSeverityCounts();
     const summary = this.generateSummary();
@@ -746,7 +747,15 @@ export class SecurityScanner {
       /(?:send|post|upload|transmit|webhook|discord\.com\/api\/webhooks|hooks\.slack\.com|curl|fetch|exfiltrat)[\s\S]{0,220}(?:api[_ -]?key|token|secret|password|process\.env|environment variable|credential)/i.test(content);
 
     if (asksForDangerousTools && exfiltrationInstruction) {
-      const lineNumber = this.findFirstMatchingLine(lines, /read|collect|steal|extract|exfiltrate|grab|dump|webhook|secret|token|process\.env/i);
+      // Evidence is the instruction itself: one line, or two adjacent lines (within two lines,
+      // either order), that touch a secret and send something. Body lines outside code fences
+      // first, then anywhere except the tool list (so a description: counts), then secret-only.
+      // Setup prose, headings, docs examples and allowed-tools don't stand in; no match, no line.
+      const secret = /api[_ -]?key|token|secret|password|process\.env|environment variable|credential/i;
+      // Inflections count too ("sends", "posting", "uploaded"), as they do in detection.
+      const outbound = /\b(?:send|post|upload|transmit|transmitt|curl|fetch)(?:s|es|ed|ing)?\b|webhook|discord\.com\/api\/webhooks|hooks\.slack\.com|exfiltrat/i;
+      const evidence = this.findInstructionSpan(lines, secret, outbound);
+      const lineNumber = evidence?.line;
       this.addFinding({
         severity: 'critical',
         category: 'Malicious Skill Instructions',
@@ -754,7 +763,7 @@ export class SecurityScanner {
         description: 'The skill instructions request dangerous capabilities while discussing secret access and outbound transmission.',
         file: file.name,
         line: lineNumber,
-        snippet: lines[lineNumber - 1]?.trim(),
+        snippet: evidence?.text,
         remediation: 'Reject this skill unless the requested capabilities are minimized and the outbound behavior is removed or fully justified.'
       });
     }
@@ -807,13 +816,17 @@ export class SecurityScanner {
         if (scripts[hook]) {
           const script = String(scripts[hook]);
           const severity: Severity = this.isDangerousLifecycleScript(script) ? 'critical' : 'medium';
+          // Quote the effective scripts.<hook> property verbatim from the source, with its real line.
+          // Unlocatable (e.g. unusual JSON) means no line rather than a guessed one.
+          const located = locateScriptsHook(content, hook);
           this.addFinding({
             severity,
             category: 'Install Hooks',
             title: `${hook} script detected`,
             description: 'Package has install/uninstall hooks that run automatically during npm operations.',
             file: file.name,
-            snippet: `"${hook}": "${script}"`,
+            line: located?.line,
+            snippet: located?.text ?? `"${hook}": ${JSON.stringify(script)}`,
             remediation: severity === 'critical'
               ? 'Remove network, shell, or filesystem-modifying behavior from lifecycle scripts before installation.'
               : 'Review install hook scripts to ensure they perform only necessary setup tasks.'
@@ -1181,6 +1194,62 @@ export class SecurityScanner {
     return content.substring(0, index).split('\n').length;
   }
 
+  /** First line passing `matches` after any leading `---` frontmatter block, or undefined. */
+  private findSkillBodyLine(lines: string[], matches: (line: string, index: number) => boolean): number | undefined {
+    let start = 0;
+    if (lines[0]?.trim() === '---') {
+      const end = lines.findIndex((line, i) => i > 0 && line.trim() === '---');
+      if (end > 0) start = end + 1;
+    }
+    for (let i = start; i < lines.length; i++) {
+      if (matches(lines[i], i)) return i + 1;
+    }
+    return undefined;
+  }
+
+  /** See the Malicious Skill Instructions rule: locate the instruction span used as evidence. */
+  private findInstructionSpan(lines: string[], secret: RegExp, outbound: RegExp): { line: number; text: string } | undefined {
+    const isTool = (line: string) => /^\s*(?:allowed-tools|tools|permissions)\s*[:=-]/i.test(line);
+    let bodyStart = 0;
+    if (lines[0]?.trim() === '---') {
+      const close = lines.findIndex((line, i) => i > 0 && line.trim() === '---');
+      if (close > 0) bodyStart = close + 1;
+    }
+    const fenced: boolean[] = [];
+    let open = false;
+    for (const line of lines) {
+      if (/^\s*(?:```|~~~)/.test(line)) { fenced.push(true); open = !open; continue; }
+      fenced.push(open);
+    }
+    const next = (i: number) => {
+      for (let j = i + 1; j <= i + 2 && j < lines.length; j++) if (lines[j].trim() !== '') return j;
+      return -1;
+    };
+    type Span = [number, number];
+    const same = (i: number): Span | undefined => (secret.test(lines[i]) && outbound.test(lines[i]) ? [i, i] : undefined);
+    const pair = (i: number): Span | undefined => {
+      const j = next(i);
+      if (j < 0 || isTool(lines[j])) return undefined;
+      const forward = secret.test(lines[i]) && outbound.test(lines[j]);
+      const reverse = outbound.test(lines[i]) && secret.test(lines[j]);
+      return forward || reverse ? [i, j] : undefined;
+    };
+    const secretOnly = (i: number): Span | undefined => (secret.test(lines[i]) ? [i, i] : undefined);
+    const search = (from: number, skipFenced: boolean, match: (i: number) => Span | undefined) => {
+      for (let i = from; i < lines.length; i++) {
+        if (isTool(lines[i]) || (skipFenced && fenced[i])) continue;
+        const span = match(i);
+        if (span) return span;
+      }
+      return undefined;
+    };
+    const span = search(bodyStart, true, same) ?? search(bodyStart, true, pair)
+      ?? search(0, false, same) ?? search(0, false, pair)
+      ?? search(bodyStart, true, secretOnly) ?? search(0, false, secretOnly);
+    if (!span) return undefined;
+    return { line: span[0] + 1, text: lines.slice(span[0], span[1] + 1).map(line => line.trim()).join('\n') };
+  }
+
   private findFirstMatchingLine(lines: string[], pattern: RegExp): number {
     const index = lines.findIndex(line => pattern.test(line));
     return index >= 0 ? index + 1 : 1;
@@ -1334,4 +1403,45 @@ export class SecurityScanner {
     
     return 'No significant security issues detected. Appears safe to install.';
   }
+}
+
+/**
+ * Find the effective `scripts.<hook>` property in package.json source: the last occurrence
+ * inside the top-level `scripts` object (JSON.parse keeps the last duplicate). Returns its
+ * 1-based line and the verbatim `"hook": "value"` text, or undefined if it can't be located.
+ */
+export function locateScriptsHook(source: string, hook: string): { line: number; text: string } | undefined {
+  let depth = 0;
+  let scriptsDepth = -1;
+  let found: { start: number; end: number } | undefined;
+  const readString = (from: number) => {
+    let i = from + 1;
+    while (i < source.length && source[i] !== '"') i += source[i] === '\\' ? 2 : 1;
+    return i; // index of the closing quote
+  };
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    if (ch === '{' || ch === '[') { depth++; continue; }
+    if (ch === '}' || ch === ']') { if (depth === scriptsDepth) scriptsDepth = -1; depth--; continue; }
+    if (ch !== '"') continue;
+    const close = readString(i);
+    // Decode the key as JSON.parse would, so "post\u0069nstall" is the same key as "postinstall".
+    let key: string;
+    try { key = JSON.parse(source.slice(i, close + 1)); } catch { key = source.slice(i + 1, close); }
+    const after = source.slice(close + 1).match(/^\s*:/);
+    if (after) {
+      if (depth === 1 && key === 'scripts') {
+        // A later top-level "scripts" replaces an earlier one, so only its hooks count.
+        found = undefined;
+        if (/^\s*:\s*\{/.test(source.slice(close + 1))) scriptsDepth = depth + 1;
+      } else if (depth === scriptsDepth && key === hook) {
+        // Only a string value can be quoted verbatim; anything else isn't located.
+        const value = source.slice(close + 1).match(/^\s*:\s*"/);
+        found = value ? { start: i, end: readString(close + value[0].length) + 1 } : undefined;
+      }
+    }
+    i = close;
+  }
+  if (!found) return undefined;
+  return { line: source.slice(0, found.start).split('\n').length, text: source.slice(found.start, found.end) };
 }

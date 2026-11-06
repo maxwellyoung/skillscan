@@ -1209,7 +1209,8 @@ export class SecurityScanner {
     const fenced: boolean[] = [];
     let fence: { char: string; length: number } | undefined;
     for (const line of lines) {
-      const marker = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+      // Fences can sit inside blockquotes and list items, so look past > and list markers.
+      const marker = line.match(/^[ \t>]*(?:(?:[-*+]|\d+[.)])[ \t]+)?(`{3,}|~{3,})(.*)$/);
       if (!fence && marker && !(marker[1][0] === '`' && marker[2].includes('`'))) {
         fence = { char: marker[1][0], length: marker[1].length };
         fenced.push(true);
@@ -1225,14 +1226,20 @@ export class SecurityScanner {
       return -1;
     };
     type Span = [number, number];
-    const same = (i: number): Span | undefined => (secret.test(lines[i]) && outbound.test(lines[i]) ? [i, i] : undefined);
-    const pair = (i: number): Span | undefined => {
+    // Key-shaped secrets (GITHUB_TOKEN, process.env, an API key) outrank the bare word "token" in prose.
+    const keyShaped = /[A-Z][A-Z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD)\b|process\.env|api[_ -]?key|credential|password/;
+    let secretNow = secret;
+    const same = (i: number): Span | undefined => (secretNow.test(lines[i]) && outbound.test(lines[i]) ? [i, i] : undefined);
+    // Secret-then-send pairs are searched before send-then-secret ones, so a line that merely
+    // mentions sending doesn't capture the real instruction below it.
+    const pairIn = (reverse: boolean) => (i: number): Span | undefined => {
       const j = next(i);
       if (j < 0 || isToolAt(j)) return undefined;
-      const forward = secret.test(lines[i]) && outbound.test(lines[j]);
-      const reverse = outbound.test(lines[i]) && secret.test(lines[j]);
-      return forward || reverse ? [i, j] : undefined;
+      const [first, second] = reverse ? [outbound, secretNow] : [secretNow, outbound];
+      return first.test(lines[i]) && second.test(lines[j]) ? [i, j] : undefined;
     };
+    const forward = pairIn(false);
+    const reverse = pairIn(true);
     const secretOnly = (i: number): Span | undefined => (secret.test(lines[i]) ? [i, i] : undefined);
     const search = (from: number, skipFenced: boolean, match: (i: number) => Span | undefined) => {
       for (let i = from; i < lines.length; i++) {
@@ -1242,8 +1249,12 @@ export class SecurityScanner {
       }
       return undefined;
     };
-    const span = search(bodyStart, true, same) ?? search(bodyStart, true, pair)
-      ?? search(0, false, same) ?? search(0, false, pair)
+    const instruction = (pattern: RegExp) => {
+      secretNow = pattern;
+      return search(bodyStart, true, same) ?? search(bodyStart, true, forward) ?? search(bodyStart, true, reverse)
+        ?? search(0, false, same) ?? search(0, false, forward) ?? search(0, false, reverse);
+    };
+    const span = instruction(keyShaped) ?? instruction(secret)
       ?? search(bodyStart, true, secretOnly) ?? search(0, false, secretOnly);
     if (!span) return undefined;
     return { line: span[0] + 1, text: lines.slice(span[0], span[1] + 1).map(line => line.trim()).join('\n') };

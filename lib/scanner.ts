@@ -1219,16 +1219,26 @@ export class SecurityScanner {
     // Blockquote depth (number of leading >) and indentation with tabs expanded to 4 columns.
     const quoteDepth = (line: string) => (line.match(/^(?:[ \t]*>)*/)?.[0].match(/>/g) ?? []).length;
     const columns = (ws: string) => [...ws].reduce((n, ch) => (ch === '\t' ? n + 4 - (n % 4) : n + 1), 0);
+    // Leading indentation in one coordinate system for openers and content: > counts as a column.
+    const leadColumns = (line: string) => columns((line.match(/^[ \t>]*/)?.[0] ?? '').replace(/>/g, ' '));
+    // Content indent of the list item we're inside (0 when not in a list); a fence opened on a
+    // continuation line belongs to that item and ends when the list does.
+    let listIndent = 0;
     for (const raw of lines) {
       // CRLF files keep a trailing \r on each line; drop it so fences are still recognised.
       const line = raw.replace(/\r$/, '');
       // A fence opened inside a blockquote or list item ends with its container.
       if (fence && line.trim() !== '') {
         const quoteEnded = quoteDepth(line) < fence.depth;
-        const dedented = fence.indent > 0 && columns(line.match(/^[ \t]*/)?.[0] ?? '') < fence.indent;
+        const dedented = fence.indent > 0 && leadColumns(line) < fence.indent;
         if (quoteEnded || dedented) fence = undefined;
       }
       // Fences can sit inside blockquotes and list items, so look past > and list markers.
+      if (!fence && line.trim() !== '') {
+        const item = line.match(/^([ \t>]*)((?:[-*+]|\d+[.)])[ \t]+)/);
+        if (item) listIndent = columns(item[1].replace(/>/g, ' ')) + columns(item[2]);
+        else if (leadColumns(line) < listIndent) listIndent = 0;
+      }
       const m = line.match(/^([ \t>]*)((?:[-*+]|\d+[.)])[ \t]+)?(`{3,}|~{3,})(.*)$/);
       const lead = m?.[1] ?? '';
       const listMarker = m?.[2];
@@ -1237,7 +1247,9 @@ export class SecurityScanner {
       if (!fence && mark && !(mark[0] === '`' && info.includes('`'))) {
         // Only a list item is a container that ends on dedent; 1–3 spaces before a plain fence
         // are optional and don't bind its content.
-        fence = { char: mark[0], length: mark.length, depth: quoteDepth(line), indent: listMarker ? columns(lead.replace(/>/g, ' ')) + listMarker.length : 0 };
+        const own = listMarker ? columns(lead.replace(/>/g, ' ')) + columns(listMarker) : 0;
+        const inherited = !listMarker && listIndent > 0 && leadColumns(line) >= listIndent ? listIndent : 0;
+        fence = { char: mark[0], length: mark.length, depth: quoteDepth(line), indent: own || inherited };
         fenced.push(true);
       } else if (fence && mark && mark[0] === fence.char && mark.length >= fence.length && info.trim() === '') {
         fence = undefined;

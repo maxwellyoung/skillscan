@@ -1215,24 +1215,29 @@ export class SecurityScanner {
     // Fences close only on the same character, at least as long, with nothing after it
     // (CommonMark), so a ``` line inside a ```` block, or ~~~ inside ```, stays inside.
     const fenced: boolean[] = [];
-    let fence: { char: string; length: number; quoted: boolean; indent: number } | undefined;
+    let fence: { char: string; length: number; depth: number; indent: number } | undefined;
+    // Blockquote depth (number of leading >) and indentation with tabs expanded to 4 columns.
+    const quoteDepth = (line: string) => (line.match(/^(?:[ \t]*>)*/)?.[0].match(/>/g) ?? []).length;
+    const columns = (ws: string) => [...ws].reduce((n, ch) => (ch === '\t' ? n + 4 - (n % 4) : n + 1), 0);
     for (const raw of lines) {
       // CRLF files keep a trailing \r on each line; drop it so fences are still recognised.
       const line = raw.replace(/\r$/, '');
       // A fence opened inside a blockquote or list item ends with its container.
       if (fence && line.trim() !== '') {
-        const quoteEnded = fence.quoted && !/^\s*>/.test(line);
-        const dedented = !fence.quoted && (line.match(/^ */)?.[0].length ?? 0) < fence.indent;
+        const quoteEnded = quoteDepth(line) < fence.depth;
+        const dedented = fence.indent > 0 && columns(line.match(/^[ \t]*/)?.[0] ?? '') < fence.indent;
         if (quoteEnded || dedented) fence = undefined;
       }
       // Fences can sit inside blockquotes and list items, so look past > and list markers.
-      const m = line.match(/^([ \t>]*(?:(?:[-*+]|\d+[.)])[ \t]+)?)(`{3,}|~{3,})(.*)$/);
-      const prefix = m?.[1] ?? '';
-      const mark = m?.[2];
-      const info = m?.[3] ?? '';
+      const m = line.match(/^([ \t>]*)((?:[-*+]|\d+[.)])[ \t]+)?(`{3,}|~{3,})(.*)$/);
+      const lead = m?.[1] ?? '';
+      const listMarker = m?.[2];
+      const mark = m?.[3];
+      const info = m?.[4] ?? '';
       if (!fence && mark && !(mark[0] === '`' && info.includes('`'))) {
-        const quoted = prefix.includes('>');
-        fence = { char: mark[0], length: mark.length, quoted, indent: quoted ? 0 : prefix.length };
+        // Only a list item is a container that ends on dedent; 1–3 spaces before a plain fence
+        // are optional and don't bind its content.
+        fence = { char: mark[0], length: mark.length, depth: quoteDepth(line), indent: listMarker ? columns(lead.replace(/>/g, ' ')) + listMarker.length : 0 };
         fenced.push(true);
       } else if (fence && mark && mark[0] === fence.char && mark.length >= fence.length && info.trim() === '') {
         fence = undefined;

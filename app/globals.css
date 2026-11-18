@@ -19,11 +19,6 @@ body {
   background: hsl(355, 78%, 58%, 0.3);
 }
 
-/* Textarea focus is drawn by its wrapper; everything else keeps a visible ring. */
-textarea:focus {
-  outline: none;
-}
-
 :focus-visible {
   outline: 2px solid hsl(0 0% 100% / 0.5);
   outline-offset: 2px;
@@ -64,7 +59,7 @@ textarea:focus {
 }
 
 .code-block .ln {
-  color: hsl(0, 0%, 38%);
+  color: hsl(0, 0%, 63%);
   user-select: none;
   margin-right: 1rem;
   display: inline-block;

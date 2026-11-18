@@ -8,10 +8,12 @@ import { RegistryFetcher } from '../lib/registry';
 import { withCoverage } from '../lib/coverage';
 import { excludeFiles } from '../lib/exclusions';
 import { SecurityScanner } from '../lib/scanner';
-import { admitScan } from '../lib/rate-limit';
+import { admitScan, admitSharedRemoteScan } from '../lib/rate-limit';
 import { toSarif } from '../lib/sarif';
 import { run } from '../cli/run';
 import type { FetchBundle } from '../lib/types';
+
+const COMMIT = 'b'.repeat(40);
 
 const cleanBundle = (): FetchBundle => ({ files: [{ name: 'safe.js', path: 'safe.js', content: 'console.log("hello")' }], sourceType: 'github', fetchedAt: '', partial: false, warnings: [] });
 
@@ -21,8 +23,9 @@ describe('release hardening', () => {
     t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
       const url = new URL(String(input)); urls.push(url.href);
       if (url.hostname === 'raw.githubusercontent.com') return new Response('{}');
+      if (url.pathname.endsWith('/commits/master')) return new Response(COMMIT);
       if (!url.pathname.includes('/contents')) return Response.json({ default_branch: 'master' });
-      assert.equal(url.searchParams.get('ref'), 'master');
+      assert.equal(url.searchParams.get('ref'), COMMIT);
       return Response.json([{ type: 'file', name: 'package.json', path: 'package.json', download_url: 'https://raw.githubusercontent.com/o/r/master/package.json' }]);
     });
     const bundle = await GitHubFetcher.fetchRepoBundle('https://github.com/o/r');
@@ -34,10 +37,10 @@ describe('release hardening', () => {
   it('resolves slash-containing refs and subdirectories without assuming main', async t => {
     t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
       const url = new URL(String(input));
-      if (url.pathname.includes('/commits/')) return decodeURIComponent(url.pathname.split('/commits/')[1]) === 'feature/a' ? Response.json({}) : new Response('', { status: 404 });
+      if (url.pathname.includes('/commits/')) return decodeURIComponent(url.pathname.split('/commits/')[1]) === 'feature/a' ? new Response(COMMIT) : new Response('', { status: 404 });
       if (url.hostname === 'api.github.com') {
         assert.equal(url.pathname, '/repos/o/r/contents/skills');
-        assert.equal(url.searchParams.get('ref'), 'feature/a');
+        assert.equal(url.searchParams.get('ref'), COMMIT);
         return Response.json([{ type: 'file', name: 'SKILL.md', path: 'skills/SKILL.md', download_url: 'https://raw.githubusercontent.com/o/r/feature/a/skills/SKILL.md' }]);
       }
       return new Response('# Hello');
@@ -51,7 +54,7 @@ describe('release hardening', () => {
       calls++;
       const url = String(input);
       assert.equal(new URL(url).hostname, 'registry.npmjs.org');
-      if (url.endsWith('/x')) return Response.json({ 'dist-tags': { latest: '1' }, versions: { '1': { dist: { tarball: 'https://registry.npmjs.org/x.tgz' } } } });
+      if (url.endsWith('/x')) return Response.json({ 'dist-tags': { latest: '1' }, versions: { '1': { name: 'x', version: '1', dist: { tarball: 'https://registry.npmjs.org/x.tgz' } } } });
       return new Response('', { status: 302, headers: { location: 'http://127.0.0.1/private' } });
     });
     for (const url of ['https://evil.invalid/open-vsx.org/extension/o/r', 'https://open-vsx.org.evil.invalid/extension/o/r', './open-vsx.org/extension/o/r']) assert.equal(RegistryFetcher.isOpenVsxUrl(url), false);
@@ -76,7 +79,7 @@ describe('release hardening', () => {
     }));
     const keepAlive = setTimeout(() => {}, 100);
     try {
-      await assert.rejects(trustedFetch('https://github.com/o/r', ['github.com'], new RemoteBudget(undefined, 1, 10)), /deadline abort/);
+      await assert.rejects(trustedFetch('https://github.com/o/r', ['github.com'], new RemoteBudget(undefined, 1, 10)), /timed out/);
     } finally { clearTimeout(keepAlive); }
   });
 
@@ -87,6 +90,7 @@ describe('release hardening', () => {
     assert.equal(toSarif(result, { toolVersion: '0.1.0' }).runs[0].invocations[0].executionSuccessful, false);
     t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
       const url = String(input);
+      if (url.includes('/commits/')) return new Response(COMMIT);
       if (!url.includes('/contents')) return Response.json({ default_branch: 'main' });
       return Response.json([
         { type: 'file', name: 'safe.js', path: 'safe.js', download_url: 'https://raw.githubusercontent.com/o/r/main/safe.js' },
@@ -121,10 +125,39 @@ describe('release hardening', () => {
 
   it('enforces remote rate and concurrent scan limits and releases permits once', () => {
     const releases: Array<() => void> = [];
-    for (let i = 0; i < 4; i++) { const release = admitScan('concurrency', true); assert.ok(release); releases.push(release); }
+    for (let i = 0; i < 2; i++) { const release = admitScan('concurrency', true); assert.ok(release); releases.push(release); }
     assert.equal(admitScan('other', true), null);
+    const paste = admitScan('other', false);
+    assert.ok(paste, 'remote scans leave capacity for pasted code');
+    paste();
     releases.forEach(release => { release(); release(); });
-    const fifth = admitScan('concurrency', true); assert.ok(fifth); fifth();
+    for (let i = 0; i < 3; i++) { const release = admitScan('concurrency', true); assert.ok(release); release(); }
     assert.equal(admitScan('concurrency', true), null);
+  });
+
+  it('uses an aggregate shared remote counter and distinguishes an unavailable provider', async t => {
+    const oldUrl = process.env.SKILLSCAN_REDIS_REST_URL;
+    const oldToken = process.env.SKILLSCAN_REDIS_REST_TOKEN;
+    process.env.SKILLSCAN_REDIS_REST_URL = 'https://control.upstash.io';
+    process.env.SKILLSCAN_REDIS_REST_TOKEN = 'synthetic-test-token';
+    t.after(() => {
+      if (oldUrl === undefined) delete process.env.SKILLSCAN_REDIS_REST_URL;
+      else process.env.SKILLSCAN_REDIS_REST_URL = oldUrl;
+      if (oldToken === undefined) delete process.env.SKILLSCAN_REDIS_REST_TOKEN;
+      else process.env.SKILLSCAN_REDIS_REST_TOKEN = oldToken;
+    });
+    let count = 59;
+    t.mock.method(globalThis, 'fetch', async (input: string | URL | Request, init?: RequestInit) => {
+      assert.equal(String(input), 'https://control.upstash.io/');
+      assert.equal(init?.redirect, 'error');
+      const command = JSON.parse(String(init?.body));
+      assert.equal(command[0], 'EVAL');
+      assert.deepEqual(command.slice(2), [1, 'skillscan:remote-scans']);
+      return count >= 61 ? new Response(null, { status: 503 }) : Response.json({ result: ++count });
+    });
+    const signal = new AbortController().signal;
+    assert.equal(await admitSharedRemoteScan(signal), true);
+    assert.equal(await admitSharedRemoteScan(signal), false);
+    await assert.rejects(admitSharedRemoteScan(signal), /temporarily unavailable/);
   });
 });

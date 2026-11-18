@@ -1,0 +1,110 @@
+{
+  "scannerVersion": "0.2.0",
+  "evaluatedAt": "2026-05-21T12:00:00.000Z",
+  "corpusSha256": "a3d6fcc3a99f5ea8a4868b8f5a464cf7030adf9158da4c63d80cc2a71a3b1c13",
+  "scannerSha256": "f8ed7f4b584c019a9986b5affce685d9109e2f45c50e1eff196ed2a550ea8b3a",
+  "matrix": {
+    "pass": {
+      "pass": 3,
+      "review": 0,
+      "block": 0
+    },
+    "review": {
+      "pass": 0,
+      "review": 1,
+      "block": 0
+    },
+    "block": {
+      "pass": 0,
+      "review": 0,
+      "block": 13
+    }
+  },
+  "results": [
+    {
+      "path": "test/fixtures/benign/github-actions/pinned-readonly.workflow.yml",
+      "expected": "pass",
+      "actual": "pass"
+    },
+    {
+      "path": "test/fixtures/benign/npm/ordinary-library.package.json",
+      "expected": "pass",
+      "actual": "pass"
+    },
+    {
+      "path": "test/fixtures/benign/vscode/command-only.package.json",
+      "expected": "pass",
+      "actual": "pass"
+    },
+    {
+      "path": "test/fixtures/review/registry/fresh-high-value.npm-metadata.json",
+      "expected": "review",
+      "actual": "review"
+    },
+    {
+      "path": "test/fixtures/malicious/github-actions/pull-request-target-publish.workflow.yml",
+      "expected": "block",
+      "actual": "block"
+    },
+    {
+      "path": "test/fixtures/malicious/hostile-skill.SKILL.md",
+      "expected": "block",
+      "actual": "block"
+    },
+    {
+      "path": "test/fixtures/malicious/lifecycle-curl-pipe-shell.package.json",
+      "expected": "block",
+      "actual": "block"
+    },
+    {
+      "path": "test/fixtures/malicious/mini-shai-hulud-runtime.fixture",
+      "expected": "block",
+      "actual": "block"
+    },
+    {
+      "path": "test/fixtures/malicious/npm/optional-runtime.package.json",
+      "expected": "block",
+      "actual": "block"
+    },
+    {
+      "path": "test/fixtures/malicious/npm/postinstall-exfil.package.json",
+      "expected": "block",
+      "actual": "block"
+    },
+    {
+      "path": "test/fixtures/malicious/persistence-runner.fixture",
+      "expected": "block",
+      "actual": "block"
+    },
+    {
+      "path": "test/fixtures/malicious/python-import-time.fixture",
+      "expected": "block",
+      "actual": "block"
+    },
+    {
+      "path": "test/fixtures/malicious/registry/axios-compromised.npm-metadata.json",
+      "expected": "block",
+      "actual": "block"
+    },
+    {
+      "path": "test/fixtures/malicious/token-exfiltration.fixture",
+      "expected": "block",
+      "actual": "block"
+    },
+    {
+      "path": "test/fixtures/malicious/vscode/broad-activation.package.json",
+      "expected": "block",
+      "actual": "block"
+    },
+    {
+      "path": "test/fixtures/malicious/vscode/extension-exfil.fixture",
+      "expected": "block",
+      "actual": "block"
+    },
+    {
+      "path": "test/fixtures/malicious/vscode/fake-image-payload.fixture",
+      "expected": "block",
+      "actual": "block"
+    }
+  ]
+}

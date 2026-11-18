@@ -1,6 +1,6 @@
 # SkillScan
 
-SkillScan 0.1.0 is a static heuristic security scanner for skills, MCP servers,
+SkillScan is a static heuristic security scanner for skills, MCP servers,
 npm packages, OpenVSX extensions, and GitHub Actions workflows. Findings support
 review; a PASS is not a security certification. Do not execute scanned payloads.
 
@@ -16,6 +16,8 @@ The bundled CLI requires Node.js 20.3 or later and has no runtime dependencies.
 - `pnpm typecheck`: generate route types and check TypeScript
 - `pnpm test`: scanner, fetch boundaries, coverage, CLI, API, and SARIF tests
 - `pnpm eval:malicious`: check the malicious fixture corpus
+- `pnpm benchmark --check`: verify the published fixture report
+- `pnpm e2e:parity`: compare production API, source CLI and packed CLI
 - `pnpm skillscan <target>`: run the CLI from source
 - `pnpm build:cli`: bundle packages/cli/dist/cli.js
 
@@ -35,7 +37,7 @@ coverage warnings. `cli/run.ts` implements the CLI; `action.yml` wraps it for CI
 
 The private root package is the Next.js application. Only `packages/cli`
 (@maxwellyoung/skillscan) is publishable. Build its bundle before packing; inspect
-the tarball before publication. Keep cli/version.ts and packages/cli/package.json
+the tarball before publication. Keep lib/version.ts and packages/cli/package.json
 versions synchronized. Do not add root engines/bin/files: root engines can override
 Vercel's runtime setting.
 
@@ -44,8 +46,8 @@ Vercel's runtime setting.
 - Validate parsed HTTPS destinations before every credential-bearing request.
   GitHub redirects fail closed. Registry redirects validate every hop against
   explicit npm/OpenVSX/CDN hosts and carry no credentials.
-- Optional GITHUB_TOKEN stays server-side and is only sent to trusted GitHub hosts.
-  Use least privilege. Never log secrets, request bodies, or fetched payloads.
+- The public web scanner uses anonymous GitHub requests. Only a local CLI can
+  opt into its own GITHUB_TOKEN. Never log secrets, request bodies, or fetched payloads.
 - Remote scans have an 80-request ceiling, 45-second deadline, and at most ten
   seconds per request. Metadata, downloads, and decompression have separate limits.
 - GitHub scans include up to 50 text files, local scans 2,000, and registry archives
@@ -55,9 +57,8 @@ Vercel's runtime setting.
   Local directory scans skip .git/node_modules directories and do not follow
   symlinks. Explicit `--exclude` globs are reported. Target-owned files cannot
   silently suppress findings.
-- API limits are best-effort per process: four concurrent scans; five remote or
-  thirty pasted-code scans per IP per minute. Serverless instances do not share
-  state. Fleet-wide abuse protection requires an edge/shared limiter.
+- Each API process admits four concurrent scans, with two reserved for pasted code.
+  Per-IP and optional shared remote request budgets apply before upstream fetches.
 - Static regex checks can produce false positives and miss sophisticated attacks.
   High-risk executable examples can produce findings; explicitly exclude fixture
   paths when appropriate rather than weakening checks globally.
@@ -69,10 +70,8 @@ packaging smoke checks, a production build, and composite-action tests. Pin acti
 references to full commit SHAs. Use the repository lockfile and explicit build
 approvals in pnpm-workspace.yaml.
 
-A current audit contains one unpatched development-only braces advisory through
-eslint-config-next / fast-glob / micromatch. These glob patterns come from trusted
-lint configuration, not the public scan endpoint. Keep the advisory visible;
-do not call the complete dependency graph vulnerability-free.
+CI gates on production dependency advisories. Audit development dependencies
+separately and report relevant lint-tooling advisories.
 
 Push, merge, deployment, npm publication, and external messages require the user's
 current authorization. Distinguish local checks, hosted CI, deployment identity,

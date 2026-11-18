@@ -55,7 +55,8 @@ function formatSummary(target: string, result: ScanResult, color = false): strin
     .join(', ');
   return [
     `skillscan ${target}`,
-    `Verdict: ${paint(color, VERDICT_COLOR[result.riskLevel], VERDICT[result.riskLevel])}  Score ${result.score}/100 (${result.grade})  ${result.scannedFiles} files, ${result.linesAnalyzed} lines, ${result.checksRun} checks`,
+    `Verdict: ${paint(color, VERDICT_COLOR[result.riskLevel], VERDICT[result.riskLevel])}  Heuristic score ${result.score}/100 (${result.grade})  ${result.scannedFiles} files, ${result.linesAnalyzed} lines`,
+    `Scanner ${result.scannerVersion ?? SKILLSCAN_VERSION}${result.target ? ` · ${result.target.name}${result.target.version ? '@' + result.target.version : ''}${result.target.revision ? ' · ' + result.target.revision : ''}${result.target.path ? ' · ' + result.target.path : ''}` : ''}`,
     `Findings: ${counts}`,
     result.summary,
   ].join('\n');

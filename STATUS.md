@@ -1,22 +1,9 @@
 # Status
 
-Last updated: 2026-10-05
-Status: Active
-Lifecycle: product-hardening
+SkillScan is an active static review tool with a web scanner, local CLI, and composite GitHub Action.
 
-## Current State
-
-- Skill/security scanning tool is being hardened as a public developer-security product.
-- Scanner now includes harsher scoring, cross-line secret exfiltration detection, lifecycle-script analysis, hostile skill-instruction checks, persistence/system-modification detection, adversarial evals, and a local installed-skills false-positive corpus.
-- `skillscan` CLI (local paths plus GitHub/ClawdHub/npm/OpenVSX targets) with text, `--json`, and SARIF 2.1.0 output, `--fail-on`, and 0/1/2 exit codes. Shares `lib/scanner.ts`, `lib/targets.ts`, and `lib/files.ts` with the API route.
-- Composite GitHub Action (`action.yml`) runs the CLI and optionally uploads SARIF to code scanning. CI now runs typecheck, tests, the malicious-fixture eval, and dogfoods the action.
-- GitHub repo scans now include `.github/workflows` (a substring `.git` check previously skipped it).
-
-## Revive When
-
-- Add richer evidence extraction and package manifest heuristics.
-
-## Next Useful Move
-
-- Publish `packages/cli` to npm as `@maxwellyoung/skillscan` (bin `skillscan`; the unscoped name belongs to dejimarquis/SkillScan). Packaging, LICENSE, and the action's `cli-source: npm` path are ready; after publishing, flip the action's `cli-source` default to `npm` and drop the "not yet published" notes in README.md.
-- Expand the eval corpus with real malicious repositories; malicious-fixture regressions now run in CI.
+- The published npm release is `@maxwellyoung/skillscan@0.1.0`.
+- The source scanner and release candidate report their version in scan results. The default Action runs scanner source from the selected Action revision. Its optional npm mode can select a separately published version.
+- Run `pnpm build:cli && pnpm build && pnpm e2e:parity` to compare the production HTTP route and both source and packed CLI execution.
+- Run `pnpm benchmark --check` to verify the fixture evaluation report. The fixtures do not establish real-world detection rates.
+- A shared remote scan limit is available when a deployment supplies the dedicated Redis REST URL and token documented in README.

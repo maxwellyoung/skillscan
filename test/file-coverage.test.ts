@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -123,21 +124,22 @@ describe('text file coverage and Markdown evasion', () => {
   it('scans extensionless and arbitrary text payloads in both npm tarballs and VSIX packages', async t => {
     const entries: Array<[string, Uint8Array]> = HIDDEN_NAMES.map(name => [`package/${name}`, Buffer.from(PAYLOAD)]);
     entries.push(['package/binary.png', Buffer.from([0, 255, 0])]);
+    entries.push(['package/package.json', Buffer.from('{"name":"example","version":"1.0.0"}')]);
     const tgz = tar(entries);
     const vsix = zip(entries);
     t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
       const url = String(input);
       if (url === 'https://registry.npmjs.org/example') return Response.json({
-        name: 'example', 'dist-tags': { latest: '1.0.0' },
-        versions: { '1.0.0': { name: 'example', version: '1.0.0', dist: { tarball: 'https://registry.npmjs.org/example/-/example.tgz' } } },
+        name: 'example', 'dist-tags': { latest: '1.0.0' }, time: { '1.0.0': '2025-01-01' },
+        versions: { '1.0.0': { name: 'example', version: '1.0.0', dist: { integrity: 'sha512-' + createHash('sha512').update(tgz).digest('base64'), tarball: 'https://registry.npmjs.org/example/-/example.tgz' } } },
       });
       if (url.endsWith('.tgz')) return new Response(new Uint8Array(tgz));
-      if (url === 'https://open-vsx.org/api/example/tool') return Response.json({ name: 'tool', files: { download: 'https://open-vsx.org/example/tool.vsix' } });
+      if (url === 'https://open-vsx.org/api/example/tool') return Response.json({ name: 'tool', version: '1.0.0', files: { download: 'https://open-vsx.org/example/tool.vsix' } });
       if (url.endsWith('.vsix')) return new Response(new Uint8Array(vsix));
       throw new Error('Unexpected fetch');
     });
     for (const bundle of [await RegistryFetcher.fetchNpm('npm:example'), await RegistryFetcher.fetchOpenVsx('https://open-vsx.org/extension/example/tool')]) {
-      const artifacts = bundle.files.filter(file => /\/(tarball|vsix)\//.test(file.path));
+      const artifacts = bundle.files.filter(file => /\/(tarball|vsix)\//.test(file.path) && file.name !== 'package.json');
       assert.equal(artifacts.length, HIDDEN_NAMES.length);
       for (const file of artifacts) assert.equal((await new SecurityScanner().scan([file])).riskLevel, 'block', file.name);
       assert.equal(bundle.partial, false);
@@ -154,7 +156,7 @@ describe('text file coverage and Markdown evasion', () => {
       if (url === 'https://registry.npmjs.org/big') return new Response('x'.repeat(2_000_001));
       if (url === 'https://registry.npmjs.org/big/latest') return Response.json({
         name: 'big', version: '2.0.0', maintainers: [{ name: 'owner' }],
-        dist: { integrity: 'sha512-x', tarball: 'https://registry.npmjs.org/big/-/big-2.0.0.tgz' },
+        dist: { integrity: 'sha512-' + createHash('sha512').update(tgz).digest('base64'), tarball: 'https://registry.npmjs.org/big/-/big-2.0.0.tgz' },
       });
       if (url.endsWith('.tgz')) return new Response(new Uint8Array(tgz), { headers: { 'last-modified': storedAt } });
       throw new Error(`Unexpected fetch ${url}`);
@@ -171,13 +173,41 @@ describe('text file coverage and Markdown evasion', () => {
     assert.ok(result.findings.some(finding => finding.category === 'Registry Freshness' && finding.severity === 'high'));
   });
 
+  it('retains npm version-page pins and checks the corresponding archive digest', async t => {
+    const version = '1.2.3';
+    const tgz = tar([
+      ['package/package.json', Buffer.from(JSON.stringify({ name: 'example', version, main: 'index' }))],
+      ['package/index.js', Buffer.from('module.exports = 42;')],
+    ]);
+    let digest = createHash('sha512').update(tgz).digest('base64');
+    t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+      if (String(input).endsWith('.tgz')) return new Response(new Uint8Array(tgz));
+      return Response.json({
+        'dist-tags': { latest: '2.0.0' }, time: { [version]: '2025-01-01' },
+        versions: { [version]: { name: 'example', version, dist: { integrity: 'sha512-' + digest, tarball: 'https://registry.npmjs.org/example.tgz' } } },
+      });
+    });
+
+    const url = 'https://www.npmjs.com/package/example/v/1.2.3';
+    const bundle = await RegistryFetcher.fetchNpm(url);
+    assert.deepEqual(bundle.target, { name: 'example', version });
+    assert.equal(bundle.partial, false);
+    assert.deepEqual(bundle.artifactCoverage, { metadataFiles: 2, artifactFiles: 2, integrity: 'verified', entryPointsScanned: 1, entryPointsDeclared: 1 });
+
+    digest = createHash('sha512').update('different archive').digest('base64');
+    const mismatch = await RegistryFetcher.fetchNpm(url);
+    assert.equal(mismatch.partial, true);
+    assert.equal(mismatch.artifactCoverage?.integrity, 'mismatch');
+    assert.equal(mismatch.artifactCoverage?.artifactFiles, 0);
+  });
+
   it('stops compressed bombs at actual output limits and reports partial coverage', async t => {
     const gzipBomb = gzipSync(Buffer.alloc(12_000_001, 32));
     const zipBomb = zip([['package/index.js', Buffer.alloc(180_001, 32)]], 1);
     t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
       const url = String(input);
       if (url === 'https://registry.npmjs.org/bomb') return Response.json({
-        'dist-tags': { latest: '1.0.0' }, versions: { '1.0.0': { dist: { tarball: 'https://registry.npmjs.org/bomb.tgz' } } },
+        'dist-tags': { latest: '1.0.0' }, versions: { '1.0.0': { name: 'bomb', version: '1.0.0', dist: { tarball: 'https://registry.npmjs.org/bomb.tgz' } } },
       });
       if (url.endsWith('.tgz')) return new Response(new Uint8Array(gzipBomb));
       if (url === 'https://open-vsx.org/api/example/bomb') return Response.json({ files: { download: 'https://open-vsx.org/bomb.vsix' } });
@@ -186,7 +216,7 @@ describe('text file coverage and Markdown evasion', () => {
     for (const bundle of [await RegistryFetcher.fetchNpm('npm:bomb'), await RegistryFetcher.fetchOpenVsx('https://open-vsx.org/extension/example/bomb')]) {
       assert.equal(bundle.partial, true);
       assert.ok(bundle.warnings.some(w => /decompress/.test(w)));
-      assert.ok(!bundle.files.some(file => /\/(tarball|vsix)\//.test(file.path)));
+      assert.ok(!bundle.files.some(file => /\/(tarball|vsix)\//.test(file.path) && file.name !== 'package.json'));
     }
   });
   it('finds entrypoint payloads placed after benign archive padding', async t => {
@@ -195,7 +225,7 @@ describe('text file coverage and Markdown evasion', () => {
     entries.push(['package/z.payload', Buffer.from(PAYLOAD)], ['package/run', Buffer.from(PAYLOAD)]);
     t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
       const url = String(input);
-      if (url.includes('registry.npmjs.org/padding') && !url.endsWith('.tgz')) return Response.json({ 'dist-tags': { latest: '1' }, versions: { '1': { dist: { tarball: 'https://registry.npmjs.org/padding.tgz' } } } });
+      if (url.includes('registry.npmjs.org/padding') && !url.endsWith('.tgz')) return Response.json({ 'dist-tags': { latest: '1' }, versions: { '1': { name: 'padding', version: '1', dist: { tarball: 'https://registry.npmjs.org/padding.tgz' } } } });
       if (url.endsWith('.tgz')) return new Response(new Uint8Array(tar(entries)));
       if (url.includes('/api/')) return Response.json({ files: { download: 'https://open-vsx.org/padding.vsix' } });
       return new Response(new Uint8Array(zip(entries)));

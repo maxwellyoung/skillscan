@@ -1,5 +1,19 @@
 import { trustedHttpsUrl } from './urls';
 
+export class UpstreamError extends Error {
+  constructor(message: string, readonly status: 400 | 429 | 502 | 504, readonly retryAfter?: string) { super(message); }
+
+  static fromResponse(source: string, response: Response): UpstreamError {
+    if (response.status === 429 || response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0') {
+      const delay = response.headers.get('retry-after');
+      return new UpstreamError(source + ' is limiting requests. Try again shortly.', 429, delay && /^\d{1,5}$/.test(delay) ? delay : '60');
+    }
+    return response.status >= 500
+      ? new UpstreamError(source + ' is temporarily unavailable.', 502)
+      : new UpstreamError('The requested ' + source + ' target could not be read.', 400);
+  }
+}
+
 export class RemoteBudget {
   private requests = 0;
   private readonly deadline: number;
@@ -9,7 +23,7 @@ export class RemoteBudget {
   nextSignal(): AbortSignal {
     if (++this.requests > this.maxRequests) throw new Error('Remote scan request limit reached');
     const remaining = this.deadline - Date.now();
-    if (remaining <= 0) throw new Error('Remote scan deadline reached');
+    if (remaining <= 0) throw new UpstreamError('Remote scan deadline reached', 504);
     const timeout = AbortSignal.timeout(Math.min(10_000, remaining));
     return this.signal ? AbortSignal.any([this.signal, timeout]) : timeout;
   }
@@ -17,7 +31,13 @@ export class RemoteBudget {
 
 export async function trustedFetch(input: string, hosts: readonly string[], budget: RemoteBudget, init: RequestInit = {}): Promise<Response> {
   const url = trustedHttpsUrl(input, hosts);
-  return fetch(url.href, { ...init, redirect: 'error', signal: budget.nextSignal(), cache: 'no-store' });
+  const signal = budget.nextSignal();
+  try {
+    return await fetch(url.href, { ...init, redirect: 'error', signal, cache: 'no-store' });
+  } catch {
+    if (signal.aborted) throw new UpstreamError('Remote request timed out or was cancelled.', 504);
+    throw new UpstreamError('Could not reach the upstream service.', 502);
+  }
 }
 
 /** A response that crossed its byte limit; callers may fall back to a smaller source. */

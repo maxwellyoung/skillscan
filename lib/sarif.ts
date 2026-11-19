@@ -129,6 +129,8 @@ export function toSarif(result: ScanResult, options: SarifOptions) {
           riskLevel: result.riskLevel,
           severityCounts: result.severityCounts,
           scannedFiles: result.scannedFiles,
+          ...(result.target ? { target: result.target } : {}),
+          ...(result.artifactCoverage ? { artifactCoverage: result.artifactCoverage } : {}),
           partial: result.partial ?? false,
           excludedFiles: result.excludedFiles ?? 0,
           ...(result.scanWarnings?.length ? { scanWarnings: result.scanWarnings } : {}),

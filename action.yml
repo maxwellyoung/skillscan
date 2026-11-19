@@ -35,17 +35,17 @@ inputs:
     required: false
     default: '22'
   cli-source:
-    description: 'Where the scanner comes from: "source" runs the TypeScript CLI from this action checkout with tsx; "npm" runs the published @maxwellyoung/skillscan package at cli-version. Defaults to the published, pinned npm release.'
+    description: 'Use the scanner from this action checkout (source) or the separately published npm release (npm).'
     required: false
-    default: 'npm'
+    default: 'source'
   cli-version:
     description: 'Exact @maxwellyoung/skillscan version used when cli-source is "npm".'
     required: false
-    default: '0.1.0'
+    default: '0.2.0'
 
 outputs:
   exit-code:
-    description: '0 = nothing at or above fail-on, 1 = findings at or above fail-on, 2 = usage or runtime error.'
+    description: '0 = threshold not met, 1 = threshold met, 2 = incomplete scan or usage/runtime error. Read the scan report for its verdict.'
     value: ${{ steps.scan.outputs.exit-code }}
   sarif-file:
     description: 'Path to the SARIF report.'

@@ -4,15 +4,9 @@ Static security scanning for AI skills, MCP servers, npm packages, VS Code exten
 
 SkillScan checks local skill instructions, GitHub-hosted code, npm package metadata, OpenVSX extension metadata, GitHub Actions workflows, and MCP server repositories for risky patterns before you install or run them. It is intentionally fast and boring: static analysis, clear findings, and remediation notes.
 
-## The ClawdHub Supply Chain Crisis
+## Scope
 
-Nick Saraev's viral "It Got Worse - Clawdbot" video exposed:
-- **No vetting process** on ClawdHub - malicious skills published freely
-- **Thousands of compromised Clawdbot instances** via Shodan scanning
-- **API token theft** through malicious skill instructions
-- **Supply chain attacks** via skill repositories
-
-His advice? "Read every file or feed files to AI to check safety." **We automate that.**
+SkillScan helps prioritize manual review before installation. It checks bounded static content for risky patterns. It can miss behavior and can flag ordinary capabilities, so read the verdict alongside the exact version or commit and the coverage details.
 
 ## What it demonstrates
 
@@ -93,6 +87,8 @@ Those fixtures must all produce `riskLevel: "block"`:
 pnpm eval:malicious
 ```
 
+The [evaluation page](https://skillscan.ninetynine.digital/benchmark) exposes the reproducible pass, review, and block matrix for the checked-in fixtures. Run `pnpm benchmark --check` to reproduce it. These fixture counts do not measure real-world detection rates.
+
 The unit suite also covers benign cases that should not become noisy:
 
 - Security documentation that mentions tokens without being treated as executable theft.
@@ -156,7 +152,7 @@ The package is a single bundled file with no runtime dependencies. The unscoped 
 
 From a checkout, use `pnpm install && pnpm skillscan <target>` or
 `pnpm build:cli && node packages/cli/dist/cli.js <target>`.
-The first public npm release is `@maxwellyoung/skillscan@0.1.0`.
+The current public npm release is `@maxwellyoung/skillscan@0.2.0`.
 
 ```bash
 skillscan ./my-skill                     # Claude Code skill folder
@@ -183,17 +179,16 @@ Exit codes: `0` nothing at or above `--fail-on`, `1` at least one finding at or 
 
 Partial scans never receive a PASS verdict. Remote requests have size limits, a
 45-second scan deadline, an 80-request ceiling, and a ten-second request timeout.
-GitHub uses the repository's default branch and supports slash-containing refs.
+GitHub resolves the repository default branch, a supplied ref, or a commit to an immutable commit SHA. Direct workflow URLs retain their repository-relative paths.
 Registry archive scans prioritize manifests and referenced entry points before
-applying the 40-file cap; warnings identify incomplete coverage.
+applying the 40-file cap. Reports distinguish registry metadata from archive text, track declared entry point coverage, and verify npm tarballs against their registry digests when available.
 
 To exclude intentional test payloads, pass `--exclude 'test/**'`. Exclusions are
 explicit and visible in reports; repository-owned files cannot silently suppress
 findings. For local targets, globs match reported paths relative to the current
 working directory (or the target root when outside it).
 
-The public API has bounded bodies and best-effort limits per server instance.
-These limits do not constitute a shared fleet-wide rate limiter.
+The API bounds bodies and remote work. Each instance reserves part of its capacity for pasted code. For a fleet-wide remote limit, set `SKILLSCAN_REDIS_REST_URL` and `SKILLSCAN_REDIS_REST_TOKEN` to a dedicated Upstash Redis database in the deployment environment. It receives aggregate counter operations, with a budget of 60 remote scans per 60-second window. If the configured store is unavailable, remote admission temporarily fails and paste scans remain available.
 
 ## GitHub Action
 
@@ -231,10 +226,10 @@ jobs:
 | `category` | `skillscan` | Code scanning category for the upload |
 | `node-version` | `22` | Node.js used to run the scanner |
 | `exclude` | empty | Newline-separated explicit path globs, forwarded to `--exclude` |
-| `cli-source` | `npm` | `source` runs the TypeScript CLI from the action checkout with `npx tsx@4.22.3`; `npm` runs the published `@maxwellyoung/skillscan` package |
-| `cli-version` | `0.1.0` | Exact package version used when `cli-source` is `npm` |
+| `cli-source` | `source` | `source` runs the TypeScript CLI from the action checkout with `npx tsx@4.22.3`; `npm` runs the published `@maxwellyoung/skillscan` package |
+| `cli-version` | `0.2.0` | Exact package version used when `cli-source` is `npm` |
 
-Outputs: `exit-code` (`0`/`1`/`2`) and `sarif-file`. SARIF is uploaded before the fail-on check, so findings reach code scanning even when the step fails. Either way the action downloads one package from npm at run time (`tsx`, or the bundled CLI); it does not send scanned files anywhere. The default uses the published, pinned npm release; choose `source` to scan with the implementation in the action checkout.
+Outputs: `exit-code` (`0`/`1`/`2`) and `sarif-file`. SARIF is uploaded before the fail-on check, so findings reach code scanning even when the step fails. The default runs the scanner from the Action checkout using pinned `tsx`. Set `cli-source: npm` to use the separate pinned registry release. Reports can contain source excerpts. Enabling SARIF upload sends the report to GitHub.
 
 ## How skillscan compares
 
@@ -261,55 +256,21 @@ Checked against each project's own README, docs, and source on 2026-10-04. Cells
 
 Where the others are stronger: both can inspect live MCP servers and their actual tool descriptions, Cisco's behavioral analyzer does cross-file dataflow for Python, and Snyk Agent Scan auto-discovers agent configs across many clients. SkillScan's patterns are regex heuristics, so expect false positives and sophisticated evasions to be missed.
 
-## Why SkillScan Exists
-
-ClawdHub has **zero vetting**. Any skill can be published. The Nick Saraev video showed:
-
-1. Malicious skills stealing API tokens
-2. Thousands of compromised Clawdbot instances
-3. Supply chain attacks through skill repositories
-4. Zero protection for end users
-
-**Don't be the next victim.** Scan before you install.
-
 ## API
 
 ### POST /api/scan
 
 Scan code, GitHub repositories, npm packages, OpenVSX extensions, GitHub Actions workflows, or supported skill-directory URLs for security issues.
 
-**Request Body:**
+Send one JSON field, either `url` or `code`.
+
 ```json
-{
-  "url": "https://github.com/username/repo",
-  // OR
-  "code": "your code here"
-}
+{"url":"https://www.npmjs.com/package/is-number/v/6.0.0"}
 ```
 
-**Response:**
-```json
-{
-  "score": 85,
-  "grade": "B",
-  "summary": "Found 2 medium-risk issues. Generally safe but worth reviewing.",
-  "scannedFiles": 5,
-  "linesAnalyzed": 1247,
-  "findings": [
-    {
-      "severity": "medium",
-      "category": "Network Access",
-      "title": "Network request detected",
-      "description": "Code makes network requests which could be used for data exfiltration.",
-      "file": "index.ts",
-      "path": "src/index.ts",
-      "line": 42,
-      "snippet": "fetch('https://api.example.com/data')",
-      "remediation": "Ensure URLs are validated and requests are to trusted domains only."
-    }
-  ]
-}
-```
+The response includes `riskLevel` (`pass`, `review`, or `block`), `scannerVersion`, `target`, `partial`, `scanWarnings`, and `findings`. Registry responses also include `artifactCoverage` with separate metadata and archive counts, integrity status, and declared entry point coverage. A `200` response with `partial: true` describes the inspected subset and requires review.
+
+Invalid input returns `400`, oversized bodies return `413`, and local or upstream limits return `429`. An unavailable or timed-out upstream may return `502` or `504`. Use the local CLI for sensitive files. See the [web data handling page](https://skillscan.ninetynine.digital/privacy).
 
 ## Development
 
@@ -334,13 +295,15 @@ pnpm test
 npx tsc --noEmit
 pnpm eval:malicious
 pnpm eval:local-skills
+pnpm benchmark --check
 pnpm lint
 pnpm build:cli
 pnpm build
+pnpm e2e:parity
 ```
 
 ### npm package
-The published package lives in `packages/cli` (`@maxwellyoung/skillscan`, bin `skillscan`). `pnpm build:cli` uses esbuild to bundle `cli/` and `lib/` into `packages/cli/dist/cli.js` with no runtime dependencies and copies `LICENSE` alongside it. The root package is the private Next.js app and is never published. Keep `cli/version.ts` in sync with `packages/cli/package.json` (a test checks this).
+The published package lives in `packages/cli` (`@maxwellyoung/skillscan`, bin `skillscan`). `pnpm build:cli` uses esbuild to bundle `cli/` and `lib/` into `packages/cli/dist/cli.js` with no runtime dependencies and copies `LICENSE` alongside it. The root package is the private Next.js app and is never published. Keep `lib/version.ts` in sync with `packages/cli/package.json` (a test checks this). Run the parity check against the production build, source CLI, and packed npm tarball before promoting the registry release. After publication, verify the registry version and digest before updating the Action’s optional npm pin.
 
 ## Case Study
 

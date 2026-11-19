@@ -1,5 +1,20 @@
+export interface ScanTarget {
+  name: string;
+  version?: string;
+  revision?: string;
+  path?: string;
+}
+
+export interface ArtifactCoverage {
+  metadataFiles: number;
+  artifactFiles: number;
+  integrity: 'verified' | 'unavailable' | 'mismatch';
+  entryPointsScanned: number;
+  entryPointsDeclared: number;
+}
+
 export interface ScanResult {
-  score: number; // 0-100 (100 = safe)
+  score: number; // Heuristic finding score on a 0–100 scale.
   grade: 'A' | 'B' | 'C' | 'D' | 'F';
   riskLevel: 'pass' | 'review' | 'block';
   severityCounts: Record<Finding['severity'], number>;
@@ -8,6 +23,9 @@ export interface ScanResult {
   scannedFiles: number;
   linesAnalyzed: number;
   checksRun: number;
+  scannerVersion?: string;
+  target?: ScanTarget;
+  artifactCoverage?: ArtifactCoverage;
   sourceType?: 'code' | 'github' | 'npm' | 'openvsx' | 'local';
   fetchedAt?: string;
   partial?: boolean;
@@ -45,4 +63,6 @@ export interface FetchBundle {
   fetchedAt: string;
   partial: boolean;
   warnings: string[];
+  target?: ScanTarget;
+  artifactCoverage?: ArtifactCoverage;
 }

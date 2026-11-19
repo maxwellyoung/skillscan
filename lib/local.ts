@@ -58,11 +58,12 @@ export async function loadLocalTarget(target: string): Promise<FetchBundle> {
   const base = outsideCwd
     ? (rootStat.isFile() ? path.dirname(root) : root)
     : process.cwd();
+  const targetIdentity = { name: path.basename(root) || 'Local files', path: toPosix(path.relative(base, root)) || '.' };
 
   if (rootStat.isFile()) {
     const file = await readScannable(root, toPosix(path.relative(base, root)), warnings);
     if (!file) throw new Error('Binary file cannot be scanned as text');
-    return { files: [file], sourceType: 'local', fetchedAt, partial: warnings.length > 0, warnings };
+    return { files: [file], sourceType: 'local', target: targetIdentity, fetchedAt, partial: warnings.length > 0, warnings };
   }
 
   if (!rootStat.isDirectory()) {
@@ -100,5 +101,5 @@ export async function loadLocalTarget(target: string): Promise<FetchBundle> {
     warnings.push(`Stopped after ${MAX_LOCAL_FILES} files; the rest of the directory was not scanned.`);
   }
 
-  return { files, sourceType: 'local', fetchedAt, partial: warnings.length > 0, warnings };
+  return { files, sourceType: 'local', target: targetIdentity, fetchedAt, partial: warnings.length > 0, warnings };
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import { motion, AnimatePresence, MotionConfig } from 'framer-motion';
 import { ChevronRight, Check, Copy } from 'lucide-react';
 import { ScanResult, Finding } from '@/lib/types';
@@ -121,7 +122,7 @@ export default function Home() {
     try {
       const type = detectInputType(input);
       const trimmed = input.trim();
-      const value = type === 'url' && !/^[a-z][a-z0-9+.-]*:/i.test(trimmed) ? `https://${trimmed}` : trimmed;
+      const value = type === 'code' ? input : /^[a-z][a-z0-9+.-]*:/i.test(trimmed) ? trimmed : `https://${trimmed}`;
       const res = await fetch('/api/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -158,7 +159,7 @@ export default function Home() {
         <main className="flex-1 flex flex-col items-center px-6 pt-10 pb-20 sm:pt-[12vh]">
           <div className="w-full max-w-[560px]">
             <motion.div
-              initial={{ opacity: 0, y: 8 }}
+              initial={false}
               animate={{ opacity: 1, y: 0 }}
               transition={spring.gentle}
               className="mb-8"
@@ -168,12 +169,12 @@ export default function Home() {
               </h1>
               <p className="mt-3 text-[15px] leading-relaxed text-white/55 text-pretty">
                 Static security checks for agent skills, MCP servers, npm packages, VS&nbsp;Code extensions, and GitHub
-                Actions. Every finding points to the file and line that triggered it.
+                Actions. Review the findings and see which parts of the target were scanned.
               </p>
             </motion.div>
 
             <motion.div
-              initial={{ opacity: 0, y: 8 }}
+              initial={false}
               animate={{ opacity: 1, y: 0 }}
               transition={{ ...spring.gentle, delay: 0.05 }}
             >
@@ -198,7 +199,8 @@ export default function Home() {
                   spellCheck={false}
                   autoCapitalize="off"
                   autoCorrect="off"
-                  className="block w-full bg-white/[0.03] rounded-lg px-4 py-4 pr-14 font-mono text-[16px] sm:text-[13px] text-white/90 placeholder:font-sans placeholder:text-white/40 resize-none leading-relaxed"
+                  aria-describedby="scan-input-note"
+                  className="block w-full bg-white/[0.03] rounded-lg px-4 py-4 pr-14 font-mono text-[16px] sm:text-[13px] text-white/90 placeholder:font-sans placeholder:text-white/60 resize-none leading-relaxed"
                   rows={input.includes('\n') ? Math.min(input.split('\n').length + 1, 12) : 3}
                   onKeyDown={(e) => e.key === 'Enter' && (e.metaKey || e.ctrlKey) && scan()}
                 />
@@ -214,6 +216,10 @@ export default function Home() {
                   </motion.span>
                 )}
               </div>
+
+              <p id="scan-input-note" className="mt-2 text-[12px] leading-relaxed text-white/60">
+                This sends your input to SkillScan&apos;s server. Use the offline CLI for sensitive code.
+              </p>
 
               <div className="flex flex-wrap items-center gap-x-1 gap-y-1 mt-2 -ml-2 text-[12px] text-white/45">
                 <span className="px-2">Try</span>
@@ -234,7 +240,7 @@ export default function Home() {
             </motion.div>
 
             <motion.div
-              initial={{ opacity: 0, y: 8 }}
+              initial={false}
               animate={{ opacity: 1, y: 0 }}
               transition={{ ...spring.gentle, delay: 0.1 }}
               className="mt-5"
@@ -249,8 +255,8 @@ export default function Home() {
               >
                 {scanning ? <DotMatrixLoader /> : 'Scan'}
               </motion.button>
-              <p className="hidden [@media(hover:hover)]:block text-center text-[11px] text-white/40 mt-2.5">
-                <kbd className="font-sans">{'\u2318'}</kbd> + <kbd className="font-sans">Enter</kbd>
+              <p className="hidden [@media(hover:hover)]:block text-center text-[11px] text-white/60 mt-2.5">
+                <kbd className="font-sans">Ctrl</kbd> or <kbd className="font-sans">{'\u2318'}</kbd> + <kbd className="font-sans">Enter</kbd>
               </p>
             </motion.div>
 
@@ -288,7 +294,7 @@ export default function Home() {
           >
             ninetynine.digital
           </a>
-          <span>Pasted code is scanned in memory and not stored.</span>
+          <Link href="/privacy" className="text-white/60 hover:text-white/80">Privacy</Link>
         </footer>
       </div>
     </MotionConfig>
@@ -310,7 +316,7 @@ function CopyCommand({ command }: { command: string }) {
 
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.08] bg-white/[0.02] pl-4 pr-1.5 py-1.5">
-      <code className="min-w-0 truncate font-mono text-[12.5px] text-white/75 select-all">
+      <code className="min-w-0 break-words font-mono text-[12.5px] text-white/75 select-all">
         <span className="text-white/35 select-none">$ </span>
         {command}
       </code>
@@ -332,7 +338,7 @@ function ElsewhereSection() {
   return (
     <motion.section
       className="mt-16 w-full max-w-[560px] border-t border-white/[0.07] pt-6 space-y-4"
-      initial={{ opacity: 0, y: 8 }}
+      initial={false}
       animate={{ opacity: 1, y: 0 }}
       transition={{ ...spring.gentle, delay: 0.14 }}
       aria-labelledby="elsewhere-heading"
@@ -354,9 +360,9 @@ function ElsewhereSection() {
         <a href={`${REPO_URL}/tree/main/test/fixtures/malicious`} target="_blank" rel="noopener noreferrer" className={link}>
           Malicious fixtures
         </a>
-        <a href={`${REPO_URL}#evaluation-harness`} target="_blank" rel="noopener noreferrer" className={link}>
+        <Link href="/benchmark" className={link}>
           How it&apos;s evaluated
-        </a>
+        </Link>
       </div>
     </motion.section>
   );
@@ -377,7 +383,7 @@ const SEVERITY_DOT: Record<Finding['severity'], string> = {
 const VERDICT = {
   block: { label: 'Block install', text: 'text-red-300', rule: 'bg-red-400' },
   review: { label: 'Review before installing', text: 'text-amber-200', rule: 'bg-amber-300' },
-  pass: { label: 'No blocking issues', text: 'text-emerald-200', rule: 'bg-emerald-400' },
+  pass: { label: 'No blocking patterns found', text: 'text-emerald-200', rule: 'bg-emerald-400' },
 } as const;
 
 const SOURCE_LABEL: Record<NonNullable<ScanResult['sourceType']>, string> = {
@@ -427,11 +433,14 @@ function Results({ result }: { result: ScanResult }) {
     return where ? `${where}${f.line ? `:${f.line}` : ''}` : null;
   };
 
+  const target = result.target;
+  const artifact = result.artifactCoverage;
+  const warnings = result.scanWarnings ?? [];
   const stats = [
-    `Score ${result.score}/100 (${result.grade})`,
+    `Heuristic score ${result.score}/100 (${result.grade})`,
     plural(result.scannedFiles, 'file'),
     plural(result.linesAnalyzed, 'line'),
-    `${result.checksRun} checks`,
+    result.scannerVersion ? `Scanner ${result.scannerVersion}` : null,
     result.sourceType ? SOURCE_LABEL[result.sourceType] : null,
   ].filter(Boolean);
 
@@ -450,6 +459,7 @@ function Results({ result }: { result: ScanResult }) {
         <h2 className={`mt-1 font-serif text-[36px] font-light leading-[1.1] tracking-[-0.015em] ${verdict.text}`}>
           {verdict.label}
         </h2>
+        {target && <p className="mt-2 break-words text-[13px] text-white/75"><code>{target.name}{target.version && `@${target.version}`}{target.path && `/${target.path}`}{target.revision && ` · ${target.revision}`}</code></p>}
         <p className="mt-2 text-[14px] leading-relaxed text-white/60 text-pretty">{result.summary}</p>
         <ul className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-[12px] tabular-nums text-white/45">
           {stats.map((stat) => (
@@ -458,16 +468,21 @@ function Results({ result }: { result: ScanResult }) {
         </ul>
       </div>
 
+      {artifact && (
+        <p className="mt-4 text-[12px] text-white/60">
+          {plural(artifact.metadataFiles, 'metadata file')} · {plural(artifact.artifactFiles, 'archive file')} · {artifact.entryPointsScanned}/{artifact.entryPointsDeclared} declared entry points inspected · Integrity {artifact.integrity}
+        </p>
+      )}
+
       {(result.partial || Boolean(result.scanWarnings?.length)) && (
         <div className="mt-6 rounded-md border border-amber-400/15 bg-amber-500/[0.045] px-3.5 py-3 text-[12px] leading-relaxed text-amber-100/75">
           <p className="font-medium text-amber-100/90">Partial evidence</p>
-          <ul className="mt-1 space-y-1">
-            {(result.scanWarnings?.length ? result.scanWarnings : ['Some source artifacts could not be fetched or unpacked.'])
-              .slice(0, 3)
-              .map((warning) => (
-                <li key={warning}>{warning}</li>
-              ))}
-          </ul>
+          {warnings.length > 0 ? (
+            <details className="mt-1" open={warnings.length <= 3}>
+              <summary className="cursor-pointer">{plural(warnings.length, 'coverage notice')}</summary>
+              <ul className="mt-1 space-y-1">{warnings.map((warning, index) => <li key={index} className="break-words">{warning}</li>)}</ul>
+            </details>
+          ) : <p>Some source artifacts could not be fetched or unpacked.</p>}
         </div>
       )}
 
@@ -579,8 +594,8 @@ function Results({ result }: { result: ScanResult }) {
         })}
       </div>
 
-      <p className="mt-5 text-[12px] leading-relaxed text-white/40 text-pretty">
-        Static analysis flags known risky patterns. A clean result is not a guarantee that code is safe.
+      <p className="mt-5 text-[12px] leading-relaxed text-white/60 text-pretty">
+        Static checks can miss risky behavior. Review the exact version and anything the scanner skipped before installing.
       </p>
     </motion.section>
   );

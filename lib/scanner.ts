@@ -42,6 +42,8 @@ const SHA_PIN = /^[a-f0-9]{40}$/i;
  * remote execution and secret-transmission flows are scanned in every text file.
  */
 export class SecurityScanner {
+  constructor(private readonly now: () => number = Date.now) {}
+
   private findings: Finding[] = [];
   private scannedFiles = 0;
   private linesAnalyzed = 0;
@@ -126,6 +128,9 @@ export class SecurityScanner {
    */
   private addFinding(finding: Finding): void {
     finding.path ??= this.currentFile?.path;
+    if (finding.snippet) {
+      finding.snippet = finding.snippet.replace(/((?:api[_-]?key|access[_-]?key|private[_-]?key|password|passwd|pwd|token|secret)[\w-]*['"]?\s*[:=]\s*)(['"\x60])([^'"\x60\r\n]+)\2/gi, '$1$2[REDACTED]$2');
+    }
     const key = `${finding.path ?? finding.file}:${finding.line || 0}:${finding.category}`;
     if (this.seenFindings.has(key)) return;
     this.seenFindings.add(key);
@@ -233,7 +238,7 @@ export class SecurityScanner {
 
     // 15. GitHub Actions workflow behavior
     if (this.isGitHubActionsWorkflow(file)) {
-      this.checkGitHubActionsWorkflow(content, file, lines);
+      this.checkGitHubActionsWorkflow(file, lines);
     }
 
     // 16. Registry metadata intelligence
@@ -310,7 +315,6 @@ export class SecurityScanner {
   private checkFileSystemAccess(content: string, file: GitHubFile, lines: string[]): void {
     const patterns = [
       /\bfs\.(?:readFile|writeFile|readdir|mkdir|rmdir|unlink|stat|access|createReadStream|createWriteStream)(?:Sync)?\s*\(/g,
-      /path\.(?:join|resolve).*\.\./g,
     ];
 
     patterns.forEach(pattern => {
@@ -318,7 +322,7 @@ export class SecurityScanner {
       for (const match of matches) {
         const lineNumber = this.getLineNumber(content, match.index!);
         const snippet = lines[lineNumber - 1]?.trim();
-        const severity: Severity = snippet.includes('..') ? 'high' : 'medium';
+        const severity: Severity = 'medium';
 
         this.addFinding({
           severity: this.adjustSeverity(severity, file, match.index),
@@ -660,8 +664,8 @@ export class SecurityScanner {
     this.addFinding({
       severity: 'critical',
       category: 'Secret Exfiltration Flow',
-      title: 'Secret read and outbound transmission detected',
-      description: 'Code reads sensitive environment variables and also performs outbound network transmission in the same file.',
+      title: 'Sensitive environment access and outbound network indicators',
+      description: 'Both indicators appear in the same file. Follow the values to determine whether a secret reaches the request.',
       file: file.name,
       line: lineNumber,
       snippet,
@@ -790,7 +794,7 @@ export class SecurityScanner {
       
       // Known typosquatting patterns
       const suspiciousPatterns = [
-        /^(colors|faker|request|lodash|underscore|moment|axios|express)[\d-_]/i,
+      /^(colors|faker|request|lodash|underscore|moment|axios|express)\d/i,
         /\d{6,}/,
         /^[a-z]{2,3}\d+$/,
       ];
@@ -800,7 +804,7 @@ export class SecurityScanner {
         
         if (isSuspicious) {
           this.addFinding({
-            severity: 'high',
+            severity: 'medium',
             category: 'Package Dependencies',
             title: 'Suspicious package dependency detected',
             description: `Package "${name}" has patterns similar to typosquatting or malicious packages.`,
@@ -1021,94 +1025,115 @@ export class SecurityScanner {
         (normalizedPath.endsWith('.yml') || normalizedPath.endsWith('.yaml'));
   }
 
-  private checkGitHubActionsWorkflow(content: string, file: GitHubFile, lines: string[]): void {
-    const hasPullRequestTarget = /\bpull_request_target\b/.test(content);
-    const hasWriteAll = /permissions\s*:\s*write-all/i.test(content);
-    const hasIdTokenWrite = /id-token\s*:\s*write/i.test(content);
-    const hasContentsWrite = /contents\s*:\s*write/i.test(content);
-    const hasSecrets = /\$\{\{\s*secrets\./i.test(content);
-    const hasCheckout = /uses\s*:\s*actions\/checkout@/i.test(content);
-    const hasPackagePublish = /\b(npm\s+publish|pnpm\s+publish|yarn\s+npm\s+publish|npm\s+run\s+release|semantic-release)\b/i.test(content);
+  private checkGitHubActionsWorkflow(file: GitHubFile, lines: string[]): void {
+    const yamlLines = lines.map(line => /^\s*#/.test(line) ? '' : line);
+    const jobsStart = yamlLines.findIndex(line => /^(?:jobs|"jobs"|'jobs')\s*:\s*(?:#.*)?$/.test(line));
+    const nextRootKey = (start: number) => {
+      const next = yamlLines.findIndex((line, index) => index > start && /^\S/.test(line));
+      return next < 0 ? yamlLines.length : next;
+    };
+    const jobsEnd = jobsStart < 0 ? yamlLines.length : nextRootKey(jobsStart);
+    const firstJob = jobsStart < 0 ? '' : yamlLines.slice(jobsStart + 1, jobsEnd).find(line => line.trim()) ?? '';
+    const jobIndent = firstJob.match(/^ +/)?.[0].length ?? 0;
+    const jobStarts = jobIndent ? yamlLines.flatMap((line, index) =>
+      index > jobsStart && index < jobsEnd && line.match(/^ +/)?.[0].length === jobIndent && /^\s+[^:#]+:/.test(line) ? [index] : []
+    ) : [];
+    const scopes = jobStarts.map((start, index) => ({ start, end: jobStarts[index + 1] ?? jobsEnd }));
+    if (!scopes.length) scopes.push({ start: 0, end: yamlLines.length });
+    const top = yamlLines.map((line, i) => jobsStart >= 0 && i >= jobsStart && i < jobsEnd ? '' : line);
+    const eventsStart = top.findIndex(line => /^(?:on|"on"|'on')\s*:/.test(line));
+    const events = eventsStart < 0 ? [] : top.slice(eventsStart, nextRootKey(eventsStart));
+    const triggerIndex = events.findIndex(line => /\bpull_request_target\b/.test(line));
+    const triggerLine = triggerIndex < 0 ? undefined : eventsStart + triggerIndex + 1;
+    const broadPermissions = /permissions\s*:\s*write-all|contents\s*:\s*write|id-token\s*:\s*write/i;
+    const pipeline = /\b(npm\s+publish|pnpm\s+publish|yarn\s+npm\s+publish|npm\s+run\s+release|semantic-release)\b/i;
 
-    if (hasPullRequestTarget) {
-      const lineNumber = this.findFirstMatchingLine(lines, /\bpull_request_target\b/);
-      const severity: Severity = hasSecrets || hasContentsWrite || hasWriteAll ? 'critical' : 'high';
-      this.addFinding({
-        severity,
-        category: 'GitHub Actions',
-        title: 'pull_request_target workflow detected',
-        description: 'pull_request_target can run with elevated repository context on code influenced by external pull requests.',
-        file: file.path,
-        line: lineNumber,
-        snippet: lines[lineNumber - 1]?.trim(),
-        remediation: 'Avoid pull_request_target unless the job never checks out or executes untrusted PR code. Prefer pull_request with read-only permissions.'
-      });
-    }
+    let triggerSeverity: Severity = 'medium';
+    for (const { start, end } of scopes) {
+      const job = yamlLines.slice(start, end);
+      const jobText = job.join('\n');
+      const hasSecrets = /\$\{\{\s*secrets\./i.test(jobText);
+      const hasPublish = pipeline.test(jobText);
+      const permissions = job.some(line => /^\s*permissions\s*:/.test(line)) ? job : top;
+      const offset = permissions === job ? start : 0;
+      const permissionsIndex = permissions.findIndex(line => broadPermissions.test(line));
+      const canWrite = permissionsIndex >= 0;
+      const jobSeverity = canWrite && (hasSecrets || hasPublish) ? 'critical' : canWrite || hasSecrets ? 'high' : 'medium';
+      if (severityRank[jobSeverity] < severityRank[triggerSeverity]) triggerSeverity = jobSeverity;
 
-    if (hasWriteAll || hasContentsWrite || hasIdTokenWrite) {
-      const lineNumber = this.findFirstMatchingLine(lines, /permissions\s*:\s*write-all|contents\s*:\s*write|id-token\s*:\s*write/i);
-      this.addFinding({
-        severity: hasPackagePublish || hasSecrets ? 'high' : 'medium',
-        category: 'GitHub Actions Permissions',
-        title: 'Broad write-capable workflow permissions detected',
-        description: 'Write permissions and OIDC tokens increase blast radius if the workflow or an action dependency is compromised.',
-        file: file.path,
-        line: lineNumber,
-        snippet: lines[lineNumber - 1]?.trim(),
-        remediation: 'Use least-privilege permissions at workflow and job scope. Grant write or id-token only to the exact publish job.'
-      });
-    }
-
-    if (hasPackagePublish && hasSecrets) {
-      const lineNumber = this.findFirstMatchingLine(lines, /npm\s+publish|pnpm\s+publish|yarn\s+npm\s+publish|semantic-release/i);
-      this.addFinding({
-        severity: 'high',
-        category: 'Release Pipeline',
-        title: 'Package publish workflow has secret access',
-        description: 'Recent supply-chain attacks turned package release pipelines into credential exfiltration and republishing paths.',
-        file: file.path,
-        line: lineNumber,
-        snippet: lines[lineNumber - 1]?.trim(),
-        remediation: 'Use trusted publishing with scoped OIDC, short-lived credentials, protected environments, and manual approval for high-impact packages.'
-      });
-    }
-
-    if (hasPullRequestTarget && hasCheckout) {
-      const lineNumber = this.findFirstMatchingLine(lines, /actions\/checkout@/i);
-      this.addFinding({
-        severity: 'critical',
-        category: 'GitHub Actions',
-        title: 'pull_request_target workflow checks out code',
-        description: 'Checking out code in a pull_request_target workflow is a common path to running untrusted code with elevated repository permissions.',
-        file: file.path,
-        line: lineNumber,
-        snippet: lines[lineNumber - 1]?.trim(),
-        remediation: 'Do not checkout or execute PR-controlled code in pull_request_target workflows.'
-      });
-    }
-
-    const usesPattern = /uses\s*:\s*([^@\s]+)@([^\s#]+)/gi;
-    for (const match of Array.from(content.matchAll(usesPattern))) {
-      const action = match[1];
-      const ref = match[2].replace(/^['"]|['"]$/g, '');
-      const isDockerAction = action.startsWith('docker://');
-      const isLocalAction = action.startsWith('./');
-      const isThirdParty = !isDockerAction && !isLocalAction && !action.startsWith('actions/');
-      const isPinned = SHA_PIN.test(ref);
-
-      if (isThirdParty && !isPinned) {
-        const lineNumber = this.getLineNumber(content, match.index!);
+      if (canWrite) {
+        const line = offset + permissionsIndex + 1;
         this.addFinding({
-          severity: hasPackagePublish || hasSecrets ? 'high' : 'medium',
-          category: 'GitHub Actions Pinning',
-          title: 'Third-party action is not pinned to a commit SHA',
-          description: 'Tag-based action references can move after review, as seen in recent GitHub Actions supply-chain incidents.',
+          severity: hasPublish || hasSecrets ? 'high' : 'medium',
+          category: 'GitHub Actions Permissions',
+          title: 'Write-capable workflow permissions',
+          description: 'The job declares or inherits write permissions or permission to request an OIDC token.',
           file: file.path,
-          line: lineNumber,
-          snippet: lines[lineNumber - 1]?.trim(),
-          remediation: 'Pin third-party actions to a full commit SHA and update them through reviewable dependency automation.'
+          line,
+          snippet: lines[line - 1]?.trim(),
+          remediation: 'Grant write and OIDC permissions only to the jobs that need them.',
         });
       }
+
+      if (hasPublish && hasSecrets) {
+        const line = start + job.findIndex(value => pipeline.test(value)) + 1;
+        this.addFinding({
+          severity: 'high',
+          category: 'Release Pipeline',
+          title: 'Publish job has secret access',
+          description: 'A package publishing command and a secret reference occur in the same job.',
+          file: file.path,
+          line,
+          snippet: lines[line - 1]?.trim(),
+          remediation: 'Use trusted publishing with scoped OIDC and protected environments.',
+        });
+      }
+
+      for (const [index, lineText] of job.entries()) {
+        const action = lineText.match(/^\s*(?:-\s*)?uses\s*:\s*['"]?([^@\s]+)@([^\s#'"]+)/i);
+        if (!action) continue;
+        const [, name, ref] = action;
+        const line = start + index + 1;
+        if (triggerLine !== undefined && name === 'actions/checkout') {
+          const next = job.findIndex((value, j) => j > index && /^\s*-\s*\w+\s*:/.test(value));
+          const checkout = job.slice(index + 1, next < 0 ? job.length : next).join('\n');
+          if (/\bref\s*:[^\n]*\b(?:github\.head_ref|github\.event\.pull_request\.head\.)/i.test(checkout)) {
+            this.addFinding({
+              severity: 'critical',
+              category: 'GitHub Actions',
+              title: 'Privileged workflow checks out a pull request ref',
+              description: 'The checkout step names a pull request ref in a workflow triggered by pull_request_target.',
+              file: file.path,
+              line,
+              snippet: lines[line - 1]?.trim(),
+              remediation: 'Run pull request code under pull_request with minimal permissions.',
+            });
+          }
+        }
+        if (name.startsWith('docker://') || name.startsWith('./') || name.startsWith('actions/') || SHA_PIN.test(ref)) continue;
+        this.addFinding({
+          severity: hasPublish || hasSecrets ? 'high' : 'medium',
+          category: 'GitHub Actions Pinning',
+          title: 'Third-party action is not pinned to a commit SHA',
+          description: 'Tag-based action references can move after review.',
+          file: file.path,
+          line,
+          snippet: lines[line - 1]?.trim(),
+          remediation: 'Pin third-party actions to a full commit SHA.',
+        });
+      }
+    }
+    if (triggerLine !== undefined) {
+      this.addFinding({
+        severity: triggerSeverity,
+        category: 'GitHub Actions',
+        title: 'Privileged pull request trigger requires review',
+        description: 'The pull_request_target event runs in the base repository context. Check job permissions, secret use and checkout refs.',
+        file: file.path,
+        line: triggerLine,
+        snippet: lines[triggerLine - 1]?.trim(),
+        remediation: 'Use pull_request and read-only permissions for work that runs pull request code.',
+      });
     }
   }
 
@@ -1140,7 +1165,7 @@ export class SecurityScanner {
 
       const publishedAt = version ? metadata.time?.[version] : undefined;
       if (publishedAt) {
-        const ageHours = (Date.now() - Date.parse(publishedAt)) / 36e5;
+        const ageHours = (this.now() - Date.parse(publishedAt)) / 36e5;
         if (Number.isFinite(ageHours) && ageHours >= 0) {
           const isHighValue = name ? HIGH_VALUE_PACKAGE_NAMES.has(name) || name.startsWith('@tanstack/') : false;
           if (ageHours < 24 || isHighValue && ageHours < 168) {
@@ -1446,7 +1471,7 @@ export class SecurityScanner {
       return `${infoCount} informational ${infoCount === 1 ? 'note' : 'notes'}. No actionable security issues found.`;
     }
     
-    return 'No significant security issues detected. Appears safe to install.';
+    return 'No flagged patterns in the scanned content.';
   }
 }
 

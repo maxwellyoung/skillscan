@@ -314,6 +314,25 @@ Never fetch preset codes manually. Use the CLI and review generated files.
     assert.equal(squat.findings.filter(finding => finding.category === 'Package Dependencies').length, 0, 'unrelated names are not compared');
     const nearMiss = await scan(manifest('chalk', { 'chalkk': '^1.0.0' }));
     assert.equal(nearMiss.findings.filter(finding => finding.category === 'Package Dependencies').length, 1);
+
+    const yamlExtension = await scan(manifest('vscode-yaml', { 'request-light': '^0.7.0' }));
+    assert.equal(yamlExtension.findings.filter(finding => finding.category === 'Package Dependencies').length, 0);
+  });
+
+  it('does not infer a file operation from resolving a path string', async () => {
+    const result = await scan({ name: 'webpack.config.js', path: 'webpack.config.js', content: "const output = path.resolve(__dirname, '..', 'out');" });
+    assert.equal(result.findings.filter(finding => finding.category === 'File System Access').length, 0);
+  });
+
+  it('does not combine secret access and publishing across independent workflow jobs', async () => {
+    const content = [
+      'name: Release', 'on: push', 'jobs:',
+      '  verify:', '    runs-on: ubuntu-latest', '    steps:',
+      '      - run: echo checking', '        env:', '          CHECK_TOKEN: $' + '{{ secrets.CHECK_TOKEN }}',
+      '  publish:', '    runs-on: ubuntu-latest', '    steps:', '      - run: npm publish --dry-run',
+    ].join('\n');
+    const result = await scan({ name: 'release.yml', path: '.github/workflows/release.yml', content });
+    assert.equal(result.findings.filter(finding => finding.category === 'Release Pipeline').length, 0);
   });
 
   it('does not flag pinned read-only GitHub Actions workflows', async () => {

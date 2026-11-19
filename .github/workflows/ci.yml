@@ -20,10 +20,12 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --prod
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm eval:malicious
+      - run: pnpm benchmark --check
       - run: pnpm build:cli
       - name: Smoke-test the bundled CLI and its npm tarball
         run: |
@@ -32,6 +34,7 @@ jobs:
           test "$code" = "1"
           cd packages/cli && npm pack --dry-run
       - run: pnpm build
+      - run: pnpm e2e:parity
 
   # Dogfood the composite action from this checkout. Benign fixtures must pass;
   # the malicious corpus must make the action fail.
@@ -39,11 +42,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Verify the source fallback
+      - name: Verify the published npm alternative
         uses: ./
         with:
           path: test/fixtures/benign
-          cli-source: source
+          cli-source: npm
       - name: Scan benign fixtures
         uses: ./
         with:

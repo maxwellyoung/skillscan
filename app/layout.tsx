@@ -1,13 +1,12 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import { Newsreader } from "next/font/google";
+import { SITE_URL } from "@/lib/site";
 import "./globals.css";
 
 const sans = localFont({ src: "./fonts/GeistVF.woff", variable: "--font-sans", weight: "100 900" });
 const mono = localFont({ src: "./fonts/GeistMonoVF.woff", variable: "--font-mono", weight: "100 900" });
 const serif = Newsreader({ subsets: ["latin"], variable: "--font-serif", weight: ["300", "400"], style: ["normal"] });
-
-const SITE_URL = "https://skillscan.ninetynine.digital";
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -19,7 +18,8 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: "SkillScan – Security Scanner for AI Skills, npm & VS Code",
   description:
-    "Static security checks for agent skills, MCP servers, npm packages, VS Code extensions, and GitHub Actions. Source-linked findings in the browser, the npm CLI, or CI.",
+    "Static checks for agent skills, MCP servers, npm packages, VS Code extensions and GitHub Actions. Review findings in the browser, npm CLI or CI.",
+  alternates: { canonical: '/' },
   keywords:
     "claude code, mcp, npm security, vscode extension security, security scanner, static analysis, skill scanner, ai security, vulnerability scanner, github security, code analysis, supply chain security",
   authors: [{ name: "ninetynine.digital", url: "https://ninetynine.digital" }],

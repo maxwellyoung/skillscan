@@ -1,13 +1,30 @@
 import { gunzipSync, inflateRawSync } from 'node:zlib';
-import { GitHubFile, FetchBundle } from './types';
+import { createHash } from 'node:crypto';
+import type { ArtifactCoverage, GitHubFile, FetchBundle } from './types';
 import { decodeTextContent } from './files';
-import { RemoteBudget, ResponseTooLargeError, readBoundedResponse, readBoundedJson, trustedFetch } from './remote';
+import { RemoteBudget, ResponseTooLargeError, UpstreamError, readBoundedResponse, readBoundedJson, trustedFetch } from './remote';
 import { trustedHttpsUrl } from './urls';
 
 const MAX_ARTIFACT_BYTES = 6_000_000;
 const MAX_EXTRACTED_FILES = 40;
 const MAX_EXTRACTED_FILE_BYTES = 180_000;
 const MAX_INFLATED_ARTIFACT_BYTES = 12_000_000;
+
+class ArchiveWarnings {
+  private readonly entries: string[] = [];
+  private omitted = 0;
+
+  push(message: string) {
+    if (this.entries.length < 40) this.entries.push(message);
+    else this.omitted++;
+  }
+
+  report(): string[] {
+    return this.omitted ? [...this.entries, this.omitted + ' additional archive warnings were left out of this report.'] : this.entries;
+  }
+}
+
+const emptySelection = () => ({ files: [] as GitHubFile[], entryPointsScanned: 0, entryPointsDeclared: 0 });
 
 function encodePackageName(name: string): string {
   return name.startsWith('@') ? `@${encodeURIComponent(name.slice(1))}` : encodeURIComponent(name);
@@ -22,18 +39,17 @@ function parseNpmSpecifier(input: string): { name: string; version?: string } | 
 
   if (!withoutUrl || withoutUrl === trimmed && /^https?:\/\//i.test(trimmed)) return null;
 
-  const cleaned = withoutUrl.split(/[?#]/)[0].replace(/\/v\/[^/]+$/i, '');
+  const path = withoutUrl.split(/[?#]/)[0].replace(/\/$/, '');
+  const versionPage = path.match(/^(.*)\/v\/([^/]+)$/i);
+  const cleaned = versionPage ? versionPage[1] : path;
   const scoped = cleaned.startsWith('@');
   const versionIndex = scoped ? cleaned.indexOf('@', 1) : cleaned.lastIndexOf('@');
 
-  if (versionIndex > 0) {
-    return {
-      name: cleaned.slice(0, versionIndex),
-      version: cleaned.slice(versionIndex + 1) || undefined,
-    };
-  }
-
-  return { name: cleaned };
+  const name = versionIndex > 0 ? cleaned.slice(0, versionIndex) : cleaned;
+  const version = versionPage?.[2] ?? (versionIndex > 0 ? cleaned.slice(versionIndex + 1) : undefined);
+  if (!/^(?:@[a-z0-9_.-]+\/)?[a-z0-9_.-]+$/i.test(name) || name === '.' || name === '..') return null;
+  if (version !== undefined && (!/^[a-z0-9][a-z0-9_.+-]*$/i.test(version) || versionPage && versionIndex > 0)) return null;
+  return { name, version };
 }
 
 function parseOpenVsxUrl(input: string): { namespace: string; extension: string; version?: string } | null {
@@ -44,7 +60,7 @@ function parseOpenVsxUrl(input: string): { namespace: string; extension: string;
   } catch { return null; }
 }
 
-async function fetchArtifact(url: string, warnings: string[], hosts: string[], budget: RemoteBudget): Promise<{ bytes: Buffer; lastModified?: string } | null> {
+async function fetchArtifact(url: string, warnings: ArchiveWarnings, hosts: string[], budget: RemoteBudget): Promise<{ bytes: Buffer; lastModified?: string } | null> {
   try {
     // Follow only explicitly validated registry/CDN redirects. No credentials are attached.
     let response: Response | undefined;
@@ -68,20 +84,33 @@ async function fetchArtifact(url: string, warnings: string[], hosts: string[], b
 }
 
 /** Manifest and referenced entry points take precedence over archive order. */
-function selectArtifactFiles(files: GitHubFile[], warnings: string[]): GitHubFile[] {
+function selectArtifactFiles(files: GitHubFile[], warnings: ArchiveWarnings, truncatedPaths = new Set<string>()) {
   const entrypoints = new Set<string>();
-  for (const file of files.filter(file => file.name === 'package.json')) {
+  const knownPaths = new Set(files.map(file => file.path));
+  const manifests = files.filter(file => file.name === 'package.json');
+  if (!files.length) warnings.push('No analyzable text was extracted from the archive.');
+  if (!manifests.length && files.length) warnings.push('The archive manifest could not be inspected.');
+  const declared = new Map<string, string>();
+  for (const file of manifests) {
     try {
       const manifest = JSON.parse(file.content);
       const root = file.path.slice(0, file.path.lastIndexOf('/') + 1);
-      const collect = (value: unknown): void => {
-        if (typeof value === 'string') entrypoints.add(root + value.replace(/^\.\//, ''));
-        else if (value && typeof value === 'object') Object.values(value).forEach(collect);
+      const collect = (value: unknown, required = true): void => {
+        if (typeof value === 'string' && !value.includes('*') && !value.endsWith('/')) {
+          const path = root + value.replace(/^\.\//, '');
+          const resolved = [path, path + '.js', path + '.json', path + '/index.js'].find(candidate => knownPaths.has(candidate));
+          if (resolved) entrypoints.add(resolved);
+          if (required) declared.set(path, resolved ?? path);
+        } else if (value && typeof value === 'object') {
+          for (const [condition, next] of Object.entries(value)) {
+            if (!/^types(?:@|$)/.test(condition)) collect(next, required);
+          }
+        }
       };
       for (const key of ['main', 'module', 'browser', 'bin', 'exports']) collect(manifest[key]);
       for (const script of Object.values(manifest.scripts || {})) {
         if (typeof script === 'string') {
-          for (const token of script.match(/[\w./-]+\.(?:[cm]?js|ts|sh|bash|zsh|ps1|py|php|pl)\b/g) || []) collect(token);
+          for (const token of script.match(/[\w./-]+\.(?:[cm]?js|ts|sh|bash|zsh|ps1|py|php|pl)\b/g) || []) collect(token, false);
         }
       }
     } catch { warnings.push(`Could not parse archive manifest ${file.path}.`); }
@@ -89,7 +118,26 @@ function selectArtifactFiles(files: GitHubFile[], warnings: string[]): GitHubFil
   const priority = (file: GitHubFile): number => file.name === 'package.json' ? 0 : entrypoints.has(file.path) ? 1 : /\.(?:[cm]?js|ts|sh|bash|zsh|ps1|py|php|pl)$/.test(file.path) ? 2 : 3;
   files.sort((a, b) => priority(a) - priority(b) || a.path.localeCompare(b.path));
   if (files.length > MAX_EXTRACTED_FILES) warnings.push(`Artifact scan limited to ${MAX_EXTRACTED_FILES} text files, prioritizing manifests and entry points.`);
-  return files.slice(0, MAX_EXTRACTED_FILES);
+  const selected = files.slice(0, MAX_EXTRACTED_FILES);
+  const fullyScanned = new Set(selected.map(file => file.path).filter(path => !truncatedPaths.has(path)));
+  let entryPointsScanned = 0;
+  for (const [declaredPath, resolvedPath] of declared) {
+    if (fullyScanned.has(resolvedPath)) entryPointsScanned++;
+    else warnings.push('Declared entry point was not fully scanned: ' + declaredPath + '.');
+  }
+  return { files: selected, entryPointsScanned, entryPointsDeclared: declared.size };
+}
+
+function verifyTarball(bytes: Buffer, integrity?: string): ArtifactCoverage['integrity'] {
+  const entries = integrity?.trim().split(/\s+/) ?? [];
+  for (const algorithm of ['sha512', 'sha384', 'sha256']) {
+    const digests = entries.filter(entry => entry.startsWith(algorithm + '-'));
+    if (digests.length) {
+      const actual = algorithm + '-' + createHash(algorithm).update(bytes).digest('base64');
+      return digests.includes(actual) ? 'verified' : 'mismatch';
+    }
+  }
+  return 'unavailable';
 }
 
 function basename(filePath: string): string {
@@ -105,16 +153,17 @@ function parseTarSize(buffer: Buffer, start: number): number {
   return /^[0-7]+$/.test(raw) ? Number.parseInt(raw, 8) : raw === '' ? 0 : NaN;
 }
 
-function extractTgz(buffer: Buffer, pathPrefix: string, warnings: string[]): GitHubFile[] {
+function extractTgz(buffer: Buffer, pathPrefix: string, warnings: ArchiveWarnings) {
   let tar: Buffer;
   try {
     tar = gunzipSync(buffer, { maxOutputLength: MAX_INFLATED_ARTIFACT_BYTES });
   } catch {
     warnings.push(`npm tarball could not be decompressed within the ${MAX_INFLATED_ARTIFACT_BYTES}-byte limit.`);
-    return [];
+    return emptySelection();
   }
 
   const files: GitHubFile[] = [];
+  const truncatedPaths = new Set<string>();
   let offset = 0;
 
   while (offset + 512 <= tar.length) {
@@ -133,10 +182,14 @@ function extractTgz(buffer: Buffer, pathPrefix: string, warnings: string[]): Git
       const contentBuffer = tar.subarray(dataStart, dataStart + Math.min(size, MAX_EXTRACTED_FILE_BYTES));
       const content = decodeTextContent(contentBuffer, truncated);
       if (content !== null) {
-        if (truncated) warnings.push(`Tarball file ${name} was truncated to ${MAX_EXTRACTED_FILE_BYTES} bytes.`);
+        const path = `${pathPrefix}/tarball/${name}`;
+        if (truncated) {
+          warnings.push(`Tarball file ${name} was truncated to ${MAX_EXTRACTED_FILE_BYTES} bytes.`);
+          truncatedPaths.add(path);
+        }
         files.push({
           name: basename(name),
-          path: `${pathPrefix}/tarball/${name}`,
+          path,
           content,
         });
       }
@@ -146,16 +199,16 @@ function extractTgz(buffer: Buffer, pathPrefix: string, warnings: string[]): Git
     offset = dataStart + Math.ceil(size / 512) * 512;
   }
 
-  return selectArtifactFiles(files, warnings);
+  return selectArtifactFiles(files, warnings, truncatedPaths);
 }
 
-function extractZip(buffer: Buffer, pathPrefix: string, warnings: string[]): GitHubFile[] {
+function extractZip(buffer: Buffer, pathPrefix: string, warnings: ArchiveWarnings) {
   const files: GitHubFile[] = [];
   const eocdOffset = buffer.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
 
   if (eocdOffset < 0 || eocdOffset + 22 > buffer.length) {
     warnings.push('VSIX central directory could not be found.');
-    return files;
+    return emptySelection();
   }
 
   const entryCount = buffer.readUInt16LE(eocdOffset + 10);
@@ -249,7 +302,7 @@ interface RegistryMetadata {
 interface PackageManifest {
   name?: string; version?: string; maintainers?: unknown;
   repository?: unknown; homepage?: unknown; bugs?: unknown;
-  dist?: { tarball?: string };
+  dist?: { tarball?: string; integrity?: string };
 }
 
 export class RegistryFetcher {
@@ -263,15 +316,15 @@ export class RegistryFetcher {
 
   static async fetchNpm(input: string, budget = new RemoteBudget()): Promise<FetchBundle> {
     const spec = parseNpmSpecifier(input);
-    if (!spec) throw new Error('Invalid npm package URL or package URL');
-    const warnings: string[] = [];
+    if (!spec) throw new Error('Invalid npm package URL or specifier');
+    const warnings = new ArchiveWarnings();
     const fetchedAt = new Date().toISOString();
 
     const registryHosts = ['registry.npmjs.org'];
     const headers = { 'User-Agent': 'SkillScan-Security-Scanner/1.0' };
     const response = await trustedFetch(`https://registry.npmjs.org/${encodePackageName(spec.name)}`, registryHosts, budget, { headers });
 
-    if (!response.ok) throw new Error(`Failed to fetch npm metadata: ${response.statusText}`);
+    if (!response.ok) throw UpstreamError.fromResponse('npm', response);
 
     let metadata: RegistryMetadata | undefined;
     try {
@@ -286,7 +339,8 @@ export class RegistryFetcher {
     let publishedAtSource: 'registry' | 'tarball-last-modified' | undefined = time ? 'registry' : undefined;
 
     if (metadata) {
-      version = spec.version || metadata['dist-tags']?.latest;
+      const requested = spec.version || 'latest';
+      version = metadata['dist-tags']?.[requested] ?? spec.version;
       packageJson = metadata.versions?.[version ?? ''];
     } else {
       // Popular packages publish multi-megabyte packuments (react ~7 MB, next ~31 MB).
@@ -295,13 +349,17 @@ export class RegistryFetcher {
         `https://registry.npmjs.org/${encodePackageName(spec.name)}/${encodeURIComponent(spec.version || 'latest')}`,
         registryHosts, budget, { headers },
       );
-      if (manifestResponse.ok) {
-        packageJson = await readBoundedJson(manifestResponse) as PackageManifest;
-        version = packageJson.version;
+      if (!manifestResponse.ok) throw UpstreamError.fromResponse('npm', manifestResponse);
+      packageJson = await readBoundedJson(manifestResponse) as PackageManifest;
+      version = packageJson.version;
+      if (spec.version && /^\d+\.\d+\.\d+(?:[-+].*)?$/.test(spec.version) && version !== spec.version) {
+        throw new Error('npm response did not match the requested version');
       }
     }
 
-    if (!packageJson || !version) throw new Error(`npm package version not found: ${spec.name}@${version ?? spec.version ?? 'latest'}`);
+    if (!packageJson || !version || packageJson.version !== version || packageJson.name !== spec.name) {
+      throw new Error('npm response did not match the requested package and resolved version');
+    }
 
     const files: GitHubFile[] = [
       {
@@ -312,10 +370,24 @@ export class RegistryFetcher {
     ];
 
     const tarballUrl = packageJson.dist?.tarball;
+    let integrity: ArtifactCoverage['integrity'] = 'unavailable';
+    let selection = emptySelection();
     if (tarballUrl) {
       const artifact = await fetchArtifact(tarballUrl, warnings, registryHosts, budget);
       if (artifact) {
-        files.push(...extractTgz(artifact.bytes, `npm:${spec.name}@${version}`, warnings));
+        integrity = verifyTarball(artifact.bytes, packageJson.dist?.integrity);
+        if (integrity === 'mismatch') warnings.push('npm tarball integrity did not match the registry digest. The archive was not scanned.');
+        else {
+          if (integrity === 'unavailable') warnings.push('No supported integrity digest was available for the npm tarball.');
+          selection = extractTgz(artifact.bytes, `npm:${spec.name}@${version}`, warnings);
+          const manifest = selection.files.find(file => file.path === `npm:${spec.name}@${version}/tarball/package/package.json`);
+          try {
+            const published = manifest && JSON.parse(manifest.content);
+            if (published?.name !== spec.name || published?.version !== version) warnings.push('The archive manifest did not confirm the resolved npm package and version.');
+          } catch {
+            warnings.push('The archive manifest could not confirm the resolved npm package and version.');
+          }
+        }
         // The CDN stores the tarball at publish, so Last-Modified is never earlier than the
         // publish time. Using it errs toward flagging a version as fresh, not hiding it.
         const storedAt = artifact.lastModified ? Date.parse(artifact.lastModified) : NaN;
@@ -328,7 +400,7 @@ export class RegistryFetcher {
       warnings.push('npm registry metadata did not include a tarball URL.');
     }
 
-    if (!metadata && !time?.[version]) warnings.push('npm publish time was unavailable; the registry freshness check did not run.');
+    if (!time?.[version]) warnings.push('npm publish time was unavailable; the registry freshness check did not run.');
 
     files.splice(1, 0, {
       name: 'npm-metadata.json',
@@ -347,19 +419,22 @@ export class RegistryFetcher {
       }, null, 2),
     });
 
+    const scanWarnings = warnings.report();
     return {
-      files,
+      files: [...files, ...selection.files],
       sourceType: 'npm',
       fetchedAt,
-      partial: warnings.length > 0,
-      warnings,
+      target: { name: spec.name, version },
+      artifactCoverage: { metadataFiles: files.length, artifactFiles: selection.files.length, integrity, entryPointsScanned: selection.entryPointsScanned, entryPointsDeclared: selection.entryPointsDeclared },
+      partial: scanWarnings.length > 0,
+      warnings: scanWarnings,
     };
   }
 
   static async fetchOpenVsx(input: string, budget = new RemoteBudget()): Promise<FetchBundle> {
     const spec = parseOpenVsxUrl(input);
     if (!spec) throw new Error('Invalid OpenVSX extension URL');
-    const warnings: string[] = [];
+    const warnings = new ArchiveWarnings();
     const fetchedAt = new Date().toISOString();
 
     const versionPath = spec.version ? `/${spec.version}` : '';
@@ -367,9 +442,11 @@ export class RegistryFetcher {
       headers: { 'User-Agent': 'SkillScan-Security-Scanner/1.0' },
     });
 
-    if (!response.ok) throw new Error(`Failed to fetch OpenVSX metadata: ${response.statusText}`);
+    if (!response.ok) throw UpstreamError.fromResponse('OpenVSX', response);
 
     const metadata = await readBoundedJson(response) as RegistryMetadata;
+    if (spec.version && spec.version !== metadata.version) throw new Error('OpenVSX response did not match the requested version');
+    if (!metadata.version) warnings.push('OpenVSX did not report the extension version.');
     const packageJson = metadata.manifest || {
       name: metadata.name,
       version: metadata.version,
@@ -394,22 +471,26 @@ export class RegistryFetcher {
       },
     ];
 
+    let selection = emptySelection();
     const downloadUrl = metadata.files?.download || metadata.files?.downloadUrl || metadata.downloadUrl;
     if (downloadUrl) {
       const artifact = (await fetchArtifact(downloadUrl, warnings, ['open-vsx.org', 'openvsx.eclipsecontent.org'], budget))?.bytes;
       if (artifact) {
-        files.push(...extractZip(artifact, `openvsx:${spec.namespace}.${spec.extension}`, warnings));
+        selection = extractZip(artifact, `openvsx:${spec.namespace}.${spec.extension}`, warnings);
       }
     } else {
       warnings.push('OpenVSX metadata did not include a VSIX download URL.');
     }
 
+    const scanWarnings = warnings.report();
     return {
-      files,
+      files: [...files, ...selection.files],
       sourceType: 'openvsx',
       fetchedAt,
-      partial: warnings.length > 0,
-      warnings,
+      target: { name: spec.namespace + '.' + spec.extension, version: metadata.version },
+      artifactCoverage: { metadataFiles: files.length, artifactFiles: selection.files.length, integrity: 'unavailable', entryPointsScanned: selection.entryPointsScanned, entryPointsDeclared: selection.entryPointsDeclared },
+      partial: scanWarnings.length > 0,
+      warnings: scanWarnings,
     };
   }
 }

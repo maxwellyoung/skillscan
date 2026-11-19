@@ -6,8 +6,31 @@ import { fetchRemoteTarget, isRemoteTarget, TargetError } from '../lib/targets';
 import { POST } from '../app/api/scan/route';
 import { NextRequest } from 'next/server';
 import { MAX_FILE_BYTES } from '../lib/files';
+import { UpstreamError } from '../lib/remote';
+
+const COMMIT = 'a'.repeat(40);
 
 describe('GitHub fetch trust boundary', () => {
+  it('preserves workflow paths and keeps the web scan public-only', async t => {
+    const original = process.env.GITHUB_TOKEN;
+    process.env.GITHUB_TOKEN = 'synthetic-regression-token';
+    t.after(() => {
+      if (original === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = original;
+    });
+    t.mock.method(globalThis, 'fetch', async (input: string | URL | Request, init?: RequestInit) => {
+      assert.equal(new Headers(init?.headers).get('authorization'), null);
+      assert.equal(new URL(String(input)).pathname, '/owner/repo/' + COMMIT + '/.github/workflows/ci.yml');
+      return new Response('name: CI\non: push\njobs:\n  quality:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hello');
+    });
+    const response = await POST(new NextRequest('http://localhost/api/scan', {
+      method: 'POST', headers: { 'x-real-ip': 'github-workflow-control' },
+      body: JSON.stringify({ url: 'https://github.com/owner/repo/blob/' + COMMIT + '/.github/workflows/ci.yml' }),
+    }));
+    assert.equal(response.status, 200);
+    assert.deepEqual((await response.json()).target, { name: 'owner/repo', revision: COMMIT, path: '.github/workflows/ci.yml' });
+  });
+
   it('rejects hostile URL representations before any request or credential use', async t => {
     const fetchMock = t.mock.method(globalThis, 'fetch', async () => {
       throw new Error('Unexpected network request');
@@ -73,9 +96,10 @@ describe('GitHub fetch trust boundary', () => {
     t.mock.method(globalThis, 'fetch', async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       requests.push(url);
-      assert.equal(new URL(url).hostname, 'raw.githubusercontent.com');
       assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer synthetic-regression-token');
       assert.equal(init?.redirect, 'error');
+      if (new URL(url).hostname === 'api.github.com') return new Response(COMMIT);
+      assert.equal(new URL(url).hostname, 'raw.githubusercontent.com');
       return new Response('console.log("hello");');
     });
     for (const url of [
@@ -83,11 +107,12 @@ describe('GitHub fetch trust boundary', () => {
       'https://raw.githubusercontent.com/owner/repo/main/install',
     ]) {
       const bundle = await fetchRemoteTarget(url);
+      assert.equal(bundle.target?.revision, COMMIT);
       assert.equal(bundle.files[0].name, 'install');
       assert.equal(bundle.files[0].content, 'console.log("hello");');
     }
-    assert.equal(requests.length, 2);
-    assert.equal(new URL(requests[0]).pathname, '/owner/repo/main/install');
+    assert.equal(requests.length, 4);
+    assert.equal(new URL(requests[1]).pathname, '/owner/repo/' + COMMIT + '/install');
   });
 
   it('surfaces a rejected redirect without making a second request', async t => {
@@ -96,7 +121,7 @@ describe('GitHub fetch trust boundary', () => {
       throw new TypeError('fetch failed: redirect disallowed');
     });
     t.mock.method(console, 'error', () => {});
-    await assert.rejects(fetchRemoteTarget('https://raw.githubusercontent.com/o/r/main/install'), TargetError);
+    await assert.rejects(fetchRemoteTarget('https://raw.githubusercontent.com/o/r/' + COMMIT + '/install'), UpstreamError);
     assert.equal(fetchMock.mock.callCount(), 1);
   });
 
@@ -109,7 +134,7 @@ describe('GitHub fetch trust boundary', () => {
       cancel() { cancelled = true; },
     });
     t.mock.method(globalThis, 'fetch', async () => new Response(stream));
-    await assert.rejects(GitHubFetcher.fetchSingleFile('https://raw.githubusercontent.com/o/r/main/install'), /size limit/);
+    await assert.rejects(GitHubFetcher.fetchSingleFile('https://raw.githubusercontent.com/o/r/' + COMMIT + '/install'), /size limit/);
     assert.equal(cancelled, true);
   });
 
@@ -122,6 +147,7 @@ describe('GitHub fetch trust boundary', () => {
       assert.ok(['raw.githubusercontent.com', 'api.github.com'].includes(url.hostname));
       assert.equal(init?.redirect, 'error');
       if (url.hostname === 'api.github.com') {
+        if (url.pathname.includes('/commits/')) return new Response(COMMIT);
         if (!url.pathname.includes('/contents')) return Response.json({ default_branch: 'main' });
         return Response.json([
           { type: 'file', name: 'install', path: 'install', download_url: 'https://raw.githubusercontent.com/o/r/main/install' },
@@ -143,11 +169,12 @@ describe('GitHub fetch trust boundary', () => {
   it('resolves every advertised skill directory alias without contacting the directory host', async t => {
     t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
       const url = new URL(String(input));
+      if (url.pathname.includes('/commits/')) return new Response(COMMIT);
       if (url.hostname === 'api.github.com') return url.pathname.includes('/contents')
         ? Response.json([{ type: 'file', name: 'SKILL.md', path: 'SKILL.md', download_url: 'https://raw.githubusercontent.com/owner/skill/main/SKILL.md' }])
         : Response.json({ default_branch: 'main' });
       assert.equal(url.hostname, 'raw.githubusercontent.com');
-      assert.match(url.pathname, /^\/owner\/skill\/main\//);
+      assert.ok(url.pathname.startsWith('/owner/skill/' + COMMIT + '/'));
       return url.pathname.endsWith('/SKILL.md') ? new Response('# Skill') : new Response('', { status: 404 });
     });
     for (const host of ['claudhub.ai', 'clawdhub.ai', 'molthub.ai']) {

@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { fetchRemoteTarget, TargetError } from '@/lib/targets';
 import { SecurityScanner } from '@/lib/scanner';
 import { ScanRequest, FetchBundle } from '@/lib/types';
-import { readBoundedResponse } from '@/lib/remote';
+import { readBoundedResponse, UpstreamError } from '@/lib/remote';
 import { withCoverage } from '@/lib/coverage';
-import { admitScan } from '@/lib/rate-limit';
+import { admitScan, admitSharedRemoteScan } from '@/lib/rate-limit';
 
 function inferPastedFileName(code: string): string {
   const trimmed = code.trim();
@@ -13,7 +13,7 @@ function inferPastedFileName(code: string): string {
     return 'SKILL.md';
   }
 
-  if (/\bon\s*:\s*[\s\S]{0,500}\bjobs\s*:/i.test(trimmed) || /\bpull_request_target\b[\s\S]{0,500}\bjobs\s*:/i.test(trimmed)) {
+  if (/^['"]?on['"]?\s*:/im.test(trimmed) && /^['"]?jobs['"]?\s*:/im.test(trimmed)) {
     return 'pasted.workflow.yml';
   }
 
@@ -53,21 +53,28 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: oversized ? 'Request body is too large' : 'Provide a JSON object with a string code or url' }, { status: oversized ? 413 : 400 });
     }
     const url = body.url?.trim();
-    const code = body.code?.trim();
-    if ((!code && !url) || (code && url)) return NextResponse.json({ error: 'Provide exactly one of code or url' }, { status: 400 });
+    const code = body.code;
+    if ((body.code === undefined) === (body.url === undefined) || !code?.trim() && !url) {
+      return NextResponse.json({ error: 'Provide exactly one nonempty code or url' }, { status: 400 });
+    }
     if ((code && code.length > 200_000) || (url && url.length > 2048)) return NextResponse.json({ error: 'Input is too large' }, { status: 413 });
     const key = request.headers.get('x-real-ip') || 'unknown';
     release = admitScan(key, Boolean(url));
-    if (!release) return NextResponse.json({ error: 'Scan limit reached. Try again in a minute.' }, { status: 429, headers: { 'Retry-After': '60' } });
+    if (!release || url && !await admitSharedRemoteScan(request.signal)) {
+      return NextResponse.json({ error: 'Scan limit reached. Try again in a minute.' }, { status: 429, headers: { 'Retry-After': '60' } });
+    }
     let bundle: FetchBundle;
-    if (url) bundle = await fetchRemoteTarget(url, request.signal);
+    if (url) bundle = await fetchRemoteTarget(url, request.signal, { publicGitHubOnly: true });
     else {
       const name = inferPastedFileName(code!);
-      bundle = { files: [{ name, content: code!, path: name }], sourceType: 'code', fetchedAt: new Date().toISOString(), partial: false, warnings: [] };
+      bundle = { files: [{ name, content: code!, path: name }], sourceType: 'code', target: { name: 'Pasted code' }, fetchedAt: new Date().toISOString(), partial: false, warnings: [] };
     }
     if (!bundle.files.length) return NextResponse.json({ error: 'No files found to scan' }, { status: 400 });
-    return NextResponse.json(withCoverage(await new SecurityScanner().scan(bundle.files), bundle));
+    return NextResponse.json(withCoverage(await new SecurityScanner().scan(bundle.files), bundle), { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
+    if (error instanceof UpstreamError) {
+      return NextResponse.json({ error: error.message }, { status: error.status, headers: error.retryAfter ? { 'Retry-After': error.retryAfter } : undefined });
+    }
     if (error instanceof TargetError) return NextResponse.json({ error: error.message }, { status: 400 });
     return NextResponse.json({ error: 'Scan failed' }, { status: 500 });
   } finally { release?.(); }

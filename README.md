@@ -152,7 +152,7 @@ The package is a single bundled file with no runtime dependencies. The unscoped 
 
 From a checkout, use `pnpm install && pnpm skillscan <target>` or
 `pnpm build:cli && node packages/cli/dist/cli.js <target>`.
-The first public npm release is `@maxwellyoung/skillscan@0.1.0`.
+The current public npm release is `@maxwellyoung/skillscan@0.2.0`.
 
 ```bash
 skillscan ./my-skill                     # Claude Code skill folder
@@ -227,7 +227,7 @@ jobs:
 | `node-version` | `22` | Node.js used to run the scanner |
 | `exclude` | empty | Newline-separated explicit path globs, forwarded to `--exclude` |
 | `cli-source` | `source` | `source` runs the TypeScript CLI from the action checkout with `npx tsx@4.22.3`; `npm` runs the published `@maxwellyoung/skillscan` package |
-| `cli-version` | `0.1.0` | Exact package version used when `cli-source` is `npm` |
+| `cli-version` | `0.2.0` | Exact package version used when `cli-source` is `npm` |
 
 Outputs: `exit-code` (`0`/`1`/`2`) and `sarif-file`. SARIF is uploaded before the fail-on check, so findings reach code scanning even when the step fails. The default runs the scanner from the Action checkout using pinned `tsx`. Set `cli-source: npm` to use the separate pinned registry release. Reports can contain source excerpts. Enabling SARIF upload sends the report to GitHub.
 

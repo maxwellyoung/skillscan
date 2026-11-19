@@ -41,7 +41,7 @@ inputs:
   cli-version:
     description: 'Exact @maxwellyoung/skillscan version used when cli-source is "npm".'
     required: false
-    default: '0.1.0'
+    default: '0.2.0'
 
 outputs:
   exit-code:
